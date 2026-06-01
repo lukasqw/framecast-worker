@@ -1,0 +1,17 @@
+# Binários
+framecast-worker
+*.exe
+
+# Env local
+.env
+
+# Arquivos temporários de processamento
+/tmp/
+
+# Build cache
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp

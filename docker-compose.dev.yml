@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: framecast
+      POSTGRES_PASSWORD: framecast
+      POSTGRES_DB: framecast_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U framecast"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,sqs,ses
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # O schema é criado pelo framecast-api (GORM AutoMigrate no boot).
+  # Inicie a api ao menos uma vez antes de rodar o worker isolado:
+  #   cd ../framecast-api && go run ./cmd/api
+  worker:
+    build: .
+    environment:
+      DATABASE_URL: postgres://framecast:framecast@postgres:5432/framecast_db?sslmode=disable
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/framecast-processing
+      S3_BUCKET_RAW: framecast-videos-raw
+      S3_BUCKET_OUTPUT: framecast-videos-output
+      SES_FROM_EMAIL: noreply@framecast.local
+      SES_RECIPIENT_OVERRIDE: dev@framecast.local
+      WORKER_CONCURRENCY: "1"
+      FFMPEG_TIMEOUT_MINUTES: "30"
+      APP_ENV: dev
+      APP_VERSION: local
+      DD_SERVICE: framecast-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    restart: on-failure
