@@ -1,0 +1,90 @@
+name: 'Release — Update PR'
+description: >
+  Merges the latest source branch into an existing release branch and refreshes
+  the PR changelog. Used when a release PR is already open.
+
+inputs:
+  pr_number:
+    description: 'Number of the open release PR'
+    required: true
+  pr_branch:
+    description: 'Name of the release branch (e.g. release/v1.2.0)'
+    required: true
+  github_token:
+    description: 'GitHub token with pull-requests:write and contents:write'
+    required: true
+  source_branch:
+    description: 'Branch being merged into the release branch (e.g. develop)'
+    required: false
+    default: 'develop'
+
+runs:
+  using: composite
+  steps:
+    - name: Configure Git
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Merge source branch into Release Branch
+      shell: bash
+      env:
+        SOURCE_BRANCH: ${{ inputs.source_branch }}
+      run: |
+        git fetch origin ${{ inputs.pr_branch }}
+        git fetch origin "$SOURCE_BRANCH"
+        git checkout ${{ inputs.pr_branch }}
+
+        if git merge "origin/$SOURCE_BRANCH" --no-edit -m "chore: sync latest changes from $SOURCE_BRANCH"; then
+          git push origin ${{ inputs.pr_branch }}
+          echo "::notice::Branch ${{ inputs.pr_branch }} updated with latest $SOURCE_BRANCH"
+        else
+          git merge --abort
+          echo "::error::Merge conflict detected in PR #${{ inputs.pr_number }}"
+          echo "::error::Resolve the conflict manually on branch ${{ inputs.pr_branch }}"
+          exit 1
+        fi
+
+    - name: Update PR Changelog
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        SOURCE_BRANCH: ${{ inputs.source_branch }}
+      run: |
+        VERSION="${{ inputs.pr_branch }}"
+        VERSION="${VERSION#release/}"
+
+        LAST_TAG=$(git tag --sort=-v:refname | head -n 1)
+        if [ -z "$LAST_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" | head -20)
+        else
+          CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)")
+        fi
+
+        {
+          echo "## Release $VERSION"
+          echo ""
+          echo "Automated release from \`$SOURCE_BRANCH\` branch."
+          echo "**Last updated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "### Changelog"
+          echo "$CHANGELOG"
+          echo ""
+          echo "### Checklist"
+          echo "- [ ] Review changes"
+          echo "- [ ] Validate all tests passed"
+          echo "- [ ] Check documentation updates"
+          echo "- [ ] Ready to deploy"
+          echo ""
+          echo "### After Merge"
+          echo "- Release tag \`$VERSION\` will be created automatically"
+          echo "- Docker image will be published to ECR"
+          echo "- GitHub Release will be created"
+          echo ""
+          echo "---"
+          echo "*This PR is updated automatically on every push to \`$SOURCE_BRANCH\`. Mark as ready for review when all checks pass.*"
+        } > /tmp/pr_body.md
+
+        gh pr edit ${{ inputs.pr_number }} --body-file /tmp/pr_body.md
+        echo "::notice::PR #${{ inputs.pr_number }} changelog updated"

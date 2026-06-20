@@ -1,0 +1,35 @@
+name: 'CI — Go Build'
+description: 'Build binary + Docker smoke test'
+
+inputs:
+  go_version:
+    description: 'Go version'
+    required: false
+    default: '1.25'
+  binary_name:
+    description: 'Output binary name'
+    required: true
+  cmd_path:
+    description: 'Path to main package (e.g. ./cmd/worker)'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go_version }}
+        cache: true
+
+    - name: Build binary
+      shell: bash
+      run: |
+        CGO_ENABLED=0 GOOS=linux go build \
+          -ldflags="-s -w -X main.version=${{ github.sha }}" \
+          -o ${{ inputs.binary_name }} \
+          ${{ inputs.cmd_path }}
+
+    - name: Docker build smoke test
+      shell: bash
+      run: docker build -t ${{ inputs.binary_name }}:ci .

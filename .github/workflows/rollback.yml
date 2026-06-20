@@ -1,0 +1,131 @@
+name: Rollback Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to rollback to (e.g. v1.2.3) — must be an existing tag'
+        required: true
+        type: string
+      environment:
+        description: 'Target environment'
+        required: false
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
+
+permissions:
+  contents: read
+  id-token: write
+
+# Same concurrency group as deploy — prevents a rollback from running alongside a deploy.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+
+jobs:
+  rollback:
+    name: Rollback to ${{ github.event.inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+
+    steps:
+      - name: Validate Version Format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format: '$VERSION'. Expected format: v1.2.3"
+            exit 1
+          fi
+
+      # Checkout at the specific tag so composite actions match exactly
+      # what was used when that version was deployed.
+      - name: Checkout at ${{ github.event.inputs.version }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version }}
+          fetch-depth: 0
+
+      - name: Validate Tag Exists
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if ! git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag '$VERSION' does not exist in this repository"
+            exit 1
+          fi
+          echo "::notice::Rolling back to $VERSION ($(git rev-parse --short $VERSION))"
+
+      - name: Validate Required Secrets
+        run: |
+          MISSING=()
+          [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]     && MISSING+=("AWS_ACCESS_KEY_ID")
+          [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && MISSING+=("AWS_SECRET_ACCESS_KEY")
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::Required secrets missing: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Resolve the ECR image that was pushed at this commit.
+      # Images are tagged with the git SHA, so we can reconstruct the URI.
+      - name: Resolve ECR Image
+        id: image
+        run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          REGISTRY=$(aws ecr describe-repositories \
+            --repository-names ${{ vars.ECR_REPOSITORY || 'framecast-worker' }} \
+            --query 'repositories[0].repositoryUri' \
+            --output text)
+          IMAGE="${REGISTRY}:${COMMIT_SHA}"
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          echo "::notice::Rolling back to image: $IMAGE"
+
+      - name: Deploy Image at ${{ github.event.inputs.version }}
+        uses: ./.github/actions/deploy/k8s-deploy
+        with:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ env.AWS_REGION }}
+          eks_cluster: ${{ vars.EKS_CLUSTER || 'framecast' }}
+          k8s_namespace: ${{ vars.K8S_NAMESPACE || 'framecast' }}
+          k8s_deployment: framecast-worker
+          container_name: worker
+          image: ${{ steps.image.outputs.image }}
+          health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
+
+      - name: Rollback Summary
+        if: always()
+        run: |
+          {
+            echo "## Rollback Summary"
+            echo ""
+            echo "| Resource | Value |"
+            echo "|----------|-------|"
+            echo "| Rolled back to | \`${{ github.event.inputs.version }}\` |"
+            echo "| Environment | \`${{ env.ENVIRONMENT }}\` |"
+            echo "| Image | \`${{ steps.image.outputs.image }}\` |"
+            echo "| Region | \`${{ env.AWS_REGION }}\` |"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Actor | @${{ github.actor }} |"
+            echo "| Run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+            echo "> **Note:** No new tag was created. The rollback deployed the image from \`${{ github.event.inputs.version }}\`."
+          } >> $GITHUB_STEP_SUMMARY

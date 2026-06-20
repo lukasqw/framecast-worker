@@ -1,0 +1,150 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type — push auto-detects from conventional commits; this input is only used on workflow_dispatch"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: "minor"
+      force_reset:
+        description: "Delete orphaned release/* branches (no open PR) before creating a new release. Use when a deploy failed and the branch is stuck."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write # required for gh label create
+
+concurrency:
+  group: release
+  cancel-in-progress: false # never cancel a release in progress
+
+jobs:
+  release-pr:
+    name: Manage Release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # required for git tag history and changelog
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # FORCE RESET: deletes orphaned release/* branches (branch exists, no open PR).
+      # Triggered manually via workflow_dispatch with force_reset=true.
+      # Use when a deploy failed before creating the tag and the branch is stuck.
+      - name: Force Reset — Delete orphaned release branches
+        if: github.event.inputs.force_reset == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "::notice::force_reset=true — procurando branches release/* sem PR aberto..."
+          BRANCHES=$(gh api "repos/${{ github.repository }}/branches" \
+            --jq '.[].name | select(startswith("release/"))' 2>/dev/null || echo "")
+
+          if [ -z "$BRANCHES" ]; then
+            echo "::notice::Nenhuma branch release/* encontrada."
+          fi
+
+          for BRANCH in $BRANCHES; do
+            HAS_PR=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq 'length' 2>/dev/null || echo "0")
+            if [ "$HAS_PR" = "0" ]; then
+              echo "::notice::Deletando branch órfã: $BRANCH"
+              gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH"
+              echo "::notice::Branch $BRANCH deletada."
+            else
+              echo "::notice::Branch $BRANCH tem PR aberto — mantendo."
+            fi
+          done
+
+      # Checks if there is already an open PR from a release/* branch to main.
+      # This determines which path the workflow takes:
+      #   - PR exists  → PATH A: sync develop + update changelog
+      #   - No PR      → PATH B: calculate version + create release branch + open draft PR
+      - name: Check for Open Release PR
+        id: check_pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_DATA=$(gh pr list \
+            --base main \
+            --state open \
+            --json number,headRefName \
+            | jq -r '.[] | select(.headRefName | startswith("release/")) | "\(.number)|\(.headRefName)"' \
+            | head -1)
+
+          if [ -n "$PR_DATA" ]; then
+            PR_NUMBER=$(echo "$PR_DATA" | cut -d'|' -f1)
+            PR_BRANCH=$(echo "$PR_DATA" | cut -d'|' -f2)
+            echo "has_open_pr=true"    >> $GITHUB_OUTPUT
+            echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "pr_branch=$PR_BRANCH" >> $GITHUB_OUTPUT
+            echo "::notice::Open release PR found: #$PR_NUMBER ($PR_BRANCH)"
+          else
+            echo "has_open_pr=false" >> $GITHUB_OUTPUT
+            echo "::notice::No open release PR — will create a new release"
+          fi
+
+      # PATH A: Release PR already exists → sync develop into the release branch
+      #         and refresh the PR changelog. Version stays the same.
+      - name: Update existing release PR
+        if: steps.check_pr.outputs.has_open_pr == 'true'
+        uses: ./.github/actions/release/update-pr
+        with:
+          pr_number: ${{ steps.check_pr.outputs.pr_number }}
+          pr_branch: ${{ steps.check_pr.outputs.pr_branch }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          source_branch: ${{ vars.SOURCE_BRANCH || 'develop' }}
+
+      # PATH B: No open PR → detect version, validate guards,
+      #         create release branch and open a draft PR to main.
+      - name: Create new release PR
+        if: steps.check_pr.outputs.has_open_pr == 'false'
+        id: create
+        uses: ./.github/actions/release/create-pr
+        with:
+          release_type: ${{ github.event.inputs.release_type }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          base_branch: ${{ vars.BASE_BRANCH || 'main' }}
+          source_branch: ${{ vars.SOURCE_BRANCH || 'develop' }}
+
+      - name: Job Summary
+        if: always()
+        run: |
+          {
+            echo "## Release Workflow"
+            echo ""
+            if [ "${{ steps.check_pr.outputs.has_open_pr }}" == "true" ]; then
+              echo "**Action:** Updated existing release PR"
+              echo ""
+              echo "| | |"
+              echo "|---|---|"
+              echo "| PR | [#${{ steps.check_pr.outputs.pr_number }}](https://github.com/${{ github.repository }}/pull/${{ steps.check_pr.outputs.pr_number }}) |"
+              echo "| Branch | \`${{ steps.check_pr.outputs.pr_branch }}\` |"
+              echo "| Trigger | \`${{ github.event_name }}\` |"
+            elif [ -n "${{ steps.create.outputs.version }}" ]; then
+              echo "**Action:** Created new release PR"
+              echo ""
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Version | \`${{ steps.create.outputs.version }}\` |"
+              echo "| Branch | \`${{ steps.create.outputs.branch_name }}\` |"
+              echo "| PR | ${{ steps.create.outputs.pr_url }} |"
+              echo "| Trigger | \`${{ github.event_name }}\` |"
+            else
+              echo "**Action:** Failed before a version could be calculated"
+            fi
+          } >> $GITHUB_STEP_SUMMARY

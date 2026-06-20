@@ -1,0 +1,141 @@
+name: 'Deploy — K8s Configure'
+description: >
+  Reads Terraform state outputs from S3 (framecast-infra + framecast-db),
+  assembles DATABASE_URL, and applies K8s ConfigMap, Secret, Deployment and
+  KEDA ScaledObject. Must run before k8s-deploy — all resources are idempotent.
+
+inputs:
+  aws_access_key_id:
+    description: 'AWS access key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS secret access key'
+    required: true
+  aws_session_token:
+    description: 'AWS session token (optional)'
+    required: false
+    default: ''
+  aws_region:
+    description: 'AWS region'
+    required: false
+    default: 'us-east-1'
+  eks_cluster:
+    description: 'EKS cluster name'
+    required: true
+  k8s_namespace:
+    description: 'Kubernetes namespace'
+    required: true
+  tf_state_bucket:
+    description: 'S3 bucket holding Terraform remote states'
+    required: true
+  db_password:
+    description: 'RDS master password (used to assemble DATABASE_URL)'
+    required: true
+  image:
+    description: 'Full Docker image URI (used as APP_VERSION label)'
+    required: true
+  worker_concurrency:
+    description: 'Number of concurrent video processing jobs per pod'
+    required: false
+    default: '3'
+  ffmpeg_timeout_minutes:
+    description: 'FFmpeg execution timeout in minutes'
+    required: false
+    default: '10'
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ inputs.aws_access_key_id }}
+        aws-secret-access-key: ${{ inputs.aws_secret_access_key }}
+        aws-session-token: ${{ inputs.aws_session_token }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Update kubeconfig
+      shell: bash
+      run: |
+        aws eks update-kubeconfig \
+          --name ${{ inputs.eks_cluster }} \
+          --region ${{ inputs.aws_region }}
+
+    - name: Read Infra Terraform State
+      id: infra
+      shell: bash
+      run: |
+        aws s3 cp \
+          "s3://${{ inputs.tf_state_bucket }}/framecast/infra/terraform.tfstate" \
+          /tmp/infra.tfstate
+        echo "sqs_queue_url=$(jq -r '.outputs.sqs_queue_url.value'      /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
+        echo "s3_bucket_raw=$(jq -r '.outputs.s3_bucket_raw.value'       /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
+        echo "s3_bucket_output=$(jq -r '.outputs.s3_bucket_output.value'  /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
+        echo "ses_from_email=$(jq -r '.outputs.ses_from_identity.value'   /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
+        echo "::notice::Infra state lido com sucesso"
+
+    - name: Read DB Terraform State
+      id: db
+      shell: bash
+      run: |
+        aws s3 cp \
+          "s3://${{ inputs.tf_state_bucket }}/framecast/db/terraform.tfstate" \
+          /tmp/db.tfstate
+        RDS_ADDRESS=$(jq -r  '.outputs.rds_address.value'        /tmp/db.tfstate)
+        RDS_PORT=$(jq -r     '.outputs.rds_port.value'           /tmp/db.tfstate)
+        RDS_DATABASE=$(jq -r '.outputs.rds_database_name.value'  /tmp/db.tfstate)
+        RDS_USERNAME=$(jq -r '.outputs.rds_username.value'       /tmp/db.tfstate)
+        DB_URL="postgres://${RDS_USERNAME}:${{ inputs.db_password }}@${RDS_ADDRESS}:${RDS_PORT}/${RDS_DATABASE}?sslmode=require"
+        echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
+        echo "::notice::DB state lido com sucesso (host: $RDS_ADDRESS)"
+
+    - name: Ensure Namespace Exists
+      shell: bash
+      run: |
+        kubectl create namespace ${{ inputs.k8s_namespace }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Apply ConfigMap
+      shell: bash
+      run: |
+        kubectl create configmap framecast-worker-config \
+          --from-literal=AWS_REGION=${{ inputs.aws_region }} \
+          --from-literal=S3_BUCKET_RAW=${{ steps.infra.outputs.s3_bucket_raw }} \
+          --from-literal=S3_BUCKET_OUTPUT=${{ steps.infra.outputs.s3_bucket_output }} \
+          --from-literal=SQS_QUEUE_URL=${{ steps.infra.outputs.sqs_queue_url }} \
+          --from-literal=SES_FROM_EMAIL=${{ steps.infra.outputs.ses_from_email }} \
+          --from-literal=WORKER_CONCURRENCY=${{ inputs.worker_concurrency }} \
+          --from-literal=FFMPEG_TIMEOUT_MINUTES=${{ inputs.ffmpeg_timeout_minutes }} \
+          --from-literal=APP_ENV=production \
+          --from-literal=APP_VERSION=${{ inputs.image }} \
+          --from-literal=DD_SERVICE=framecast-worker \
+          -n ${{ inputs.k8s_namespace }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+        echo "::notice::ConfigMap framecast-worker-config aplicado"
+
+    - name: Apply Secret
+      shell: bash
+      run: |
+        kubectl create secret generic framecast-worker-secret \
+          --from-literal=DATABASE_URL=${{ steps.db.outputs.database_url }} \
+          -n ${{ inputs.k8s_namespace }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+        echo "::notice::Secret framecast-worker-secret aplicado"
+
+    - name: Apply Deployment Manifest
+      shell: bash
+      run: |
+        kubectl apply -f k8s/deployment.yaml -n ${{ inputs.k8s_namespace }}
+        echo "::notice::Deployment aplicado"
+
+    - name: Apply KEDA ScaledObject
+      shell: bash
+      run: |
+        SQS_URL="${{ steps.infra.outputs.sqs_queue_url }}"
+        AWS_REGION="${{ inputs.aws_region }}"
+        sed \
+          -e "s|SQS_QUEUE_URL_PLACEHOLDER|${SQS_URL}|g" \
+          -e "s|AWS_REGION_PLACEHOLDER|${AWS_REGION}|g" \
+          k8s/scaledobject.yaml \
+          | kubectl apply -f - -n ${{ inputs.k8s_namespace }}
+        echo "::notice::KEDA ScaledObject aplicado (fila: $SQS_URL)"

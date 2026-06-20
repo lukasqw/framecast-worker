@@ -1,0 +1,63 @@
+name: 'Deploy — Create Release'
+description: 'Creates annotated git tag and GitHub Release after successful deploy'
+
+inputs:
+  version:
+    description: 'Version to release (e.g. v1.2.3)'
+    required: true
+  github_token:
+    description: 'GitHub token with contents:write'
+    required: true
+  image:
+    description: 'Docker image URI deployed'
+    required: false
+    default: ''
+  environment:
+    description: 'Environment deployed to'
+    required: false
+    default: 'production'
+
+runs:
+  using: composite
+  steps:
+    - name: Configure Git
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Finalize Release Tag
+      uses: ./.github/actions/release/finalize-tag
+      with:
+        version: ${{ inputs.version }}
+
+    - name: Create GitHub Release
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        VERSION="${{ inputs.version }}"
+        LAST_TAG=$(git tag --sort=-v:refname | grep -v "^${VERSION}$" | head -n 1)
+
+        {
+          echo "## Release $VERSION"
+          echo ""
+          echo "**Environment:** ${{ inputs.environment }}"
+          echo "**Deployed at:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          if [ -n "${{ inputs.image }}" ]; then
+            echo ""
+            echo "**Docker image:** \`${{ inputs.image }}\`"
+          fi
+          echo ""
+          echo "### Changelog"
+          if [ -n "$LAST_TAG" ]; then
+            git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)"
+          else
+            git log --pretty=format:"- %s (%h)" | head -20
+          fi
+        } > /tmp/release_notes.md
+
+        gh release create "$VERSION" \
+          --title "Release $VERSION" \
+          --notes-file /tmp/release_notes.md \
+          --latest

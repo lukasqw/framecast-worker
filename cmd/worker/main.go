@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/joho/godotenv"
@@ -63,8 +64,20 @@ func main() {
 	proc := processor.New(db, aws.S3, aws.SQS, aws.SES, cfg.SQSQueueURL, cfg.SESFromEmail, cfg.SESRecipientOverride, cfg.FFmpegTimeoutMinutes)
 	c := consumer.New(aws.SQS, cfg.SQSQueueURL, cfg.WorkerConcurrency, proc)
 
+	// Consumer da DLQ (opcional): marca o vídeo como ERROR e notifica o usuário.
+	var wg sync.WaitGroup
+	if cfg.SQSDLQURL != "" {
+		dlqHandler := processor.NewDLQHandler(db, aws.SQS, aws.SES, cfg.SQSDLQURL, cfg.SESFromEmail, cfg.SESRecipientOverride)
+		dlqConsumer := consumer.New(aws.SQS, cfg.SQSDLQURL, 1, dlqHandler)
+		wg.Go(func() {
+			dlqConsumer.Run(ctx)
+		})
+		slog.Info("consumer DLQ iniciado", slog.String("fila", cfg.SQSDLQURL))
+	}
+
 	// Run bloqueia até ctx ser cancelado (SIGINT/SIGTERM) e aguarda goroutines ativas
 	c.Run(ctx)
+	wg.Wait()
 
 	slog.Info("worker encerrado")
 }

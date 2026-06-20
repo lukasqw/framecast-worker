@@ -123,10 +123,10 @@ func SpanWorker(ctx context.Context, operation string) (context.Context, trace.S
 
 // Métricas de negócio do worker
 var (
-	videoProcessedCounter  metric.Int64Counter
-	videoProcessingHisto   metric.Float64Histogram
-	videoFrameCountHisto   metric.Int64Histogram
-	ffmpegDurationHisto    metric.Float64Histogram
+	videoProcessedCounter metric.Int64Counter
+	videoProcessingHisto  metric.Float64Histogram
+	videoFrameCountHisto  metric.Int64Histogram
+	ffmpegDurationHisto   metric.Float64Histogram
 )
 
 func initMetrics(m metric.Meter) error {

@@ -1,0 +1,87 @@
+name: 'Deploy — Kubernetes Deploy'
+description: 'Update EKS deployment image and wait for rollout'
+
+inputs:
+  aws_access_key_id:
+    description: 'AWS access key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS secret access key'
+    required: true
+  aws_session_token:
+    description: 'AWS session token (optional)'
+    required: false
+    default: ''
+  aws_region:
+    description: 'AWS region'
+    required: false
+    default: 'us-east-1'
+  eks_cluster:
+    description: 'EKS cluster name'
+    required: true
+  k8s_namespace:
+    description: 'Kubernetes namespace'
+    required: true
+  k8s_deployment:
+    description: 'Deployment name'
+    required: true
+  container_name:
+    description: 'Container name inside the deployment'
+    required: true
+  image:
+    description: 'Full Docker image URI'
+    required: true
+  health_endpoint:
+    description: 'Health check path'
+    required: false
+    default: '/health'
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ inputs.aws_access_key_id }}
+        aws-secret-access-key: ${{ inputs.aws_secret_access_key }}
+        aws-session-token: ${{ inputs.aws_session_token }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Update kubeconfig
+      shell: bash
+      run: |
+        aws eks update-kubeconfig \
+          --name ${{ inputs.eks_cluster }} \
+          --region ${{ inputs.aws_region }}
+
+    - name: Deploy to EKS
+      shell: bash
+      run: |
+        kubectl set image deployment/${{ inputs.k8s_deployment }} \
+          ${{ inputs.container_name }}=${{ inputs.image }} \
+          -n ${{ inputs.k8s_namespace }}
+        kubectl rollout status deployment/${{ inputs.k8s_deployment }} \
+          -n ${{ inputs.k8s_namespace }} \
+          --timeout=5m
+
+    - name: Health Check
+      shell: bash
+      run: |
+        SVC_HOST=$(kubectl get service ${{ inputs.k8s_deployment }} \
+          -n ${{ inputs.k8s_namespace }} \
+          -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+        if [ -n "$SVC_HOST" ]; then
+          for i in $(seq 1 5); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              "http://$SVC_HOST${{ inputs.health_endpoint }}" 2>/dev/null || echo "0")
+            if [ "$CODE" = "200" ]; then
+              echo "::notice::Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $CODE — retrying in 15s..."
+            sleep 15
+          done
+          echo "::warning::Health check did not return 200 — deployment may still be warming up"
+        else
+          echo "::notice::No LoadBalancer host available — skipping HTTP probe"
+        fi

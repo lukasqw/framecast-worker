@@ -19,9 +19,10 @@ type Config struct {
 	S3BucketOutput string
 
 	SQSQueueURL string
+	SQSDLQURL   string // opcional: se definida, ativa o consumer da DLQ (marca ERROR + e-mail)
 
-	SESFromEmail          string
-	SESRecipientOverride  string // dev: redireciona todos os e-mails para este endereço
+	SESFromEmail         string
+	SESRecipientOverride string // dev: redireciona todos os e-mails para este endereço
 
 	WorkerConcurrency    int
 	FFmpegTimeoutMinutes int
@@ -43,6 +44,7 @@ func Load() (*Config, error) {
 		S3BucketRaw:          os.Getenv("S3_BUCKET_RAW"),
 		S3BucketOutput:       os.Getenv("S3_BUCKET_OUTPUT"),
 		SQSQueueURL:          os.Getenv("SQS_QUEUE_URL"),
+		SQSDLQURL:            os.Getenv("SQS_DLQ_URL"),
 		SESFromEmail:         os.Getenv("SES_FROM_EMAIL"),
 		SESRecipientOverride: os.Getenv("SES_RECIPIENT_OVERRIDE"),
 		OTelEndpoint:         os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),

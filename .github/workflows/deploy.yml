@@ -1,97 +1,206 @@
 name: Deploy
+run-name: 🚀 ${{ github.event.pull_request.title || format('Deploy {0}', github.ref_name) }}
 
 on:
-  push:
-    branches: ["main"]
-    tags: ["v*"]
-
-env:
-  GO_VERSION: "1.25"
-  AWS_REGION: us-east-1
-  ECR_REPOSITORY: framecast-worker
-  EKS_CLUSTER: framecast-eks
-  K8S_NAMESPACE_DEV: framecast-dev
-  K8S_NAMESPACE_PROD: framecast-prod
-  K8S_DEPLOYMENT: framecast-worker
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: false
+        type: choice
+        options:
+          - production
+          - staging
+        default: production
 
 permissions:
-  id-token: write   # OIDC
-  contents: read
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
 
 jobs:
-  build-push:
+  # ===========================================
+  # STAGE 1: Build & Push Docker image to ECR
+  # ===========================================
+  docker-push:
     name: Build & Push ECR
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     outputs:
-      image: ${{ steps.build.outputs.image }}
+      version: ${{ steps.version.outputs.VERSION }}
+      image: ${{ steps.push.outputs.image }}
+
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          fetch-depth: 0
+          ref: main
 
-      - name: Login ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build & push
-        id: build
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Extract Version
+        id: version
         run: |
-          IMAGE=$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker build -t $IMAGE .
-          docker push $IMAGE
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            TAG=$(git tag --sort=-v:refname | head -n 1 || echo "v0.0.0")
+          else
+            BRANCH="${{ github.event.pull_request.head.ref }}"
+            TAG="${BRANCH#release/}"
+          fi
+          echo "VERSION=$TAG" >> $GITHUB_OUTPUT
+          echo "::notice::Version: $TAG"
 
+      - name: Validate Required Secrets
+        run: |
+          MISSING=()
+          [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]     && MISSING+=("AWS_ACCESS_KEY_ID")
+          [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && MISSING+=("AWS_SECRET_ACCESS_KEY")
+          [ -z "${{ secrets.DB_PASSWORD }}" ]            && MISSING+=("DB_PASSWORD")
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::Required secrets missing: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - name: Build & Push Docker Image
+        id: push
+        uses: ./.github/actions/deploy/docker-push
+        with:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ env.AWS_REGION }}
+          ecr_repository: ${{ vars.ECR_REPOSITORY || 'framecast-worker' }}
+          image_tag: ${{ github.sha }}
+
+  # ===========================================
+  # STAGE 2: Deploy to dev
+  # ===========================================
   deploy-dev:
     name: Deploy → dev
+    needs: docker-push
     runs-on: ubuntu-latest
-    needs: build-push
-    if: github.ref == 'refs/heads/main'
-    environment: dev
+    timeout-minutes: 30
+    environment:
+      name: development
+
     steps:
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure K8s Resources (dev)
+        uses: ./.github/actions/deploy/k8s-configure
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ env.AWS_REGION }}
+          eks_cluster: ${{ vars.EKS_CLUSTER || 'framecast' }}
+          k8s_namespace: ${{ vars.K8S_NAMESPACE_DEV || 'framecast-dev' }}
+          tf_state_bucket: ${{ vars.TF_STATE_BUCKET || 'fiap-soat-tf-backend-framecast' }}
+          db_password: ${{ secrets.DB_PASSWORD }}
+          image: ${{ needs.docker-push.outputs.image }}
+          worker_concurrency: ${{ vars.WORKER_CONCURRENCY || '3' }}
+          ffmpeg_timeout_minutes: ${{ vars.FFMPEG_TIMEOUT_MINUTES || '10' }}
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+      - name: Deploy to EKS (dev)
+        uses: ./.github/actions/deploy/k8s-deploy
+        with:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ env.AWS_REGION }}
+          eks_cluster: ${{ vars.EKS_CLUSTER || 'framecast' }}
+          k8s_namespace: ${{ vars.K8S_NAMESPACE_DEV || 'framecast-dev' }}
+          k8s_deployment: framecast-worker
+          container_name: worker
+          image: ${{ needs.docker-push.outputs.image }}
+          health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
 
-      - name: Rollout
-        run: |
-          kubectl set image deployment/${{ env.K8S_DEPLOYMENT }} \
-            worker=${{ needs.build-push.outputs.image }} \
-            -n ${{ env.K8S_NAMESPACE_DEV }}
-          kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT }} \
-            -n ${{ env.K8S_NAMESPACE_DEV }} --timeout=5m
-
+  # ===========================================
+  # STAGE 3: Deploy to production (manual gate)
+  # ===========================================
   deploy-prod:
-    name: Deploy → prod
+    name: Deploy → production
+    needs: [docker-push, deploy-dev]
     runs-on: ubuntu-latest
-    needs: build-push
-    if: startsWith(github.ref, 'refs/tags/v')
-    environment: prod   # gate de aprovação manual
+    timeout-minutes: 30
+    environment:
+      name: production
+
     steps:
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          fetch-depth: 0
+          ref: main
 
-      - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.AWS_REGION }}
+      - name: Configure K8s Resources (prod)
+        uses: ./.github/actions/deploy/k8s-configure
+        with:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ env.AWS_REGION }}
+          eks_cluster: ${{ vars.EKS_CLUSTER || 'framecast' }}
+          k8s_namespace: ${{ vars.K8S_NAMESPACE || 'framecast' }}
+          tf_state_bucket: ${{ vars.TF_STATE_BUCKET || 'fiap-soat-tf-backend-framecast' }}
+          db_password: ${{ secrets.DB_PASSWORD }}
+          image: ${{ needs.docker-push.outputs.image }}
+          worker_concurrency: ${{ vars.WORKER_CONCURRENCY || '3' }}
+          ffmpeg_timeout_minutes: ${{ vars.FFMPEG_TIMEOUT_MINUTES || '10' }}
 
-      - name: Rollout
+      - name: Deploy to EKS (prod)
+        uses: ./.github/actions/deploy/k8s-deploy
+        with:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ env.AWS_REGION }}
+          eks_cluster: ${{ vars.EKS_CLUSTER || 'framecast' }}
+          k8s_namespace: ${{ vars.K8S_NAMESPACE || 'framecast' }}
+          k8s_deployment: framecast-worker
+          container_name: worker
+          image: ${{ needs.docker-push.outputs.image }}
+          health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
+
+      - name: Create Release
+        if: github.event_name != 'workflow_dispatch'
+        uses: ./.github/actions/deploy/create-release
+        with:
+          version: ${{ needs.docker-push.outputs.version }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          image: ${{ needs.docker-push.outputs.image }}
+          environment: production
+
+      - name: Deployment Summary
+        if: always()
         run: |
-          kubectl set image deployment/${{ env.K8S_DEPLOYMENT }} \
-            worker=${{ needs.build-push.outputs.image }} \
-            -n ${{ env.K8S_NAMESPACE_PROD }}
-          kubectl rollout status deployment/${{ env.K8S_DEPLOYMENT }} \
-            -n ${{ env.K8S_NAMESPACE_PROD }} --timeout=5m
+          {
+            echo "## Deployment Summary"
+            echo ""
+            echo "| Resource | Value |"
+            echo "|----------|-------|"
+            echo "| Version | \`${{ needs.docker-push.outputs.version }}\` |"
+            echo "| Image | \`${{ needs.docker-push.outputs.image }}\` |"
+            echo "| Region | \`${{ env.AWS_REGION }}\` |"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Actor | @${{ github.actor }} |"
+            echo "| Run | [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+          } >> $GITHUB_STEP_SUMMARY

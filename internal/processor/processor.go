@@ -59,13 +59,19 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 		log.Info("vídeo já finalizado — descartando mensagem SQS")
 		return p.deleteMessage(ctx, receiptHandle)
 	}
+	if errors.Is(err, errLeaseHeld) {
+		// Worker vivo já processa este vídeo (heartbeat fresco). Suprime a duplicata
+		// deletando a mensagem — o worker original conclui e grava DONE.
+		log.Info("vídeo em processamento por worker vivo — suprimindo duplicata")
+		return p.deleteMessage(ctx, receiptHandle)
+	}
 	if err != nil {
 		return fmt.Errorf("falha ao adquirir lease: %w", err)
 	}
 
 	log.Info("lease adquirido", slog.Int("attempt", row.Attempt))
 
-	stopHeartbeat := startHeartbeat(ctx, p.sqsClient, p.queueURL, receiptHandle)
+	stopHeartbeat := startHeartbeat(ctx, p.sqsClient, p.queueURL, receiptHandle, p.db, msg.VideoID)
 	defer stopHeartbeat()
 
 	// ── Diretório temporário — limpo sempre ao final ──────────────────────────

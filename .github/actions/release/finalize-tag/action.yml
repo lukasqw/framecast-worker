@@ -1,0 +1,32 @@
+name: 'Release — Finalize Tag'
+description: >
+  Creates and pushes the annotated release tag after a successful deploy to
+  production. Must be called only after health checks confirm the deployment
+  is healthy — a tag represents exactly what is running in prod.
+
+inputs:
+  version:
+    description: 'The version to tag (e.g. v1.2.0)'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Configure Git
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Create and Push Release Tag
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+
+        if git tag -a "$VERSION" -m "Release $VERSION"; then
+          git push origin "$VERSION"
+          echo "::notice::Tag $VERSION created — release finalised"
+        else
+          echo "::error::Failed to create tag $VERSION — it may already exist or there is a push permission issue"
+          exit 1
+        fi

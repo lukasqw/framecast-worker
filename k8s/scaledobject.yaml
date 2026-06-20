@@ -1,0 +1,18 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: framecast-worker
+spec:
+  scaleTargetRef:
+    name: framecast-worker
+  minReplicaCount: 1    # 1 pod sempre pronto — evita cold start na demo
+  maxReplicaCount: 10
+  pollingInterval: 30   # verifica fila a cada 30s
+  cooldownPeriod: 120   # aguarda 2min antes de escalar para baixo
+  triggers:
+    - type: aws-sqs-queue
+      metadata:
+        queueURL: SQS_QUEUE_URL_PLACEHOLDER   # substituído pelo k8s-configure
+        queueLength: "5"                       # 1 worker por 5 mensagens na fila
+        awsRegion: AWS_REGION_PLACEHOLDER      # substituído pelo k8s-configure
+        identityOwner: operator               # KEDA usa LabRole do node (sem IRSA)

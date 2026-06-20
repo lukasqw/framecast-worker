@@ -1,0 +1,194 @@
+name: 'Release — Create PR'
+description: >
+  Calculates the next semantic version from conventional commits (or a forced
+  release_type), validates guards, creates the release branch and opens a
+  draft PR to main.
+
+inputs:
+  release_type:
+    description: >
+      Force a specific bump (patch | minor | major).
+      Leave empty to auto-detect from conventional commits since the last tag.
+    required: false
+    default: ''
+  github_token:
+    description: 'GitHub token with contents:write, pull-requests:write and issues:write'
+    required: true
+  base_branch:
+    description: 'Target branch for the release PR (e.g. main)'
+    required: false
+    default: 'main'
+  source_branch:
+    description: 'Branch being released (e.g. develop)'
+    required: false
+    default: 'develop'
+
+outputs:
+  version:
+    description: 'The calculated release version (e.g. v1.2.0)'
+    value: ${{ steps.version.outputs.version }}
+  branch_name:
+    description: 'The release branch name (e.g. release/v1.2.0)'
+    value: ${{ steps.version.outputs.branch_name }}
+  pr_url:
+    description: 'URL of the created draft PR'
+    value: ${{ steps.create_pr.outputs.pr_url }}
+
+runs:
+  using: composite
+  steps:
+    # Uses semver-aware sort (--sort=-v:refname) so v1.10.0 > v1.9.0.
+    # When release_type is empty, bump is auto-detected from conventional commits:
+    #   major → <type>!: / <type>(<scope>)!: in subject  OR  BREAKING CHANGE: in body
+    #   minor → feat: / feat(<scope>):
+    #   patch → everything else (fix, chore, docs, refactor, perf, …)
+    - name: Get Next Version
+      id: version
+      shell: bash
+      run: |
+        LAST_TAG=$(git tag --sort=-v:refname | head -n 1)
+        echo "::notice::Last tag: ${LAST_TAG:-none}"
+
+        VERSION="${LAST_TAG#v}"
+        if [ -z "$VERSION" ]; then
+          VERSION="0.0.0"
+        fi
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+        RELEASE_TYPE="${{ inputs.release_type }}"
+
+        if [ -z "$RELEASE_TYPE" ]; then
+          if [ -n "$LAST_TAG" ]; then
+            SUBJECTS=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%s")
+            BODIES=$(git log "${LAST_TAG}..HEAD" --pretty=format:"%b")
+          else
+            SUBJECTS=$(git log --pretty=format:"%s")
+            BODIES=$(git log --pretty=format:"%b")
+          fi
+
+          if echo "$SUBJECTS" | grep -qE "^[a-z]+(\([^)]+\))?!:" || \
+             echo "$BODIES"   | grep -qE "^BREAKING CHANGE:"; then
+            RELEASE_TYPE="major"
+          elif echo "$SUBJECTS" | grep -qE "^feat(\([^)]+\))?:"; then
+            RELEASE_TYPE="minor"
+          else
+            RELEASE_TYPE="patch"
+          fi
+
+          echo "::notice::Release type auto-detected from commits: $RELEASE_TYPE"
+        fi
+
+        case $RELEASE_TYPE in
+          major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+          minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+          patch) PATCH=$((PATCH + 1)) ;;
+        esac
+
+        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+        echo "::notice::New version: $NEW_VERSION (type: $RELEASE_TYPE)"
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "branch_name=release/$NEW_VERSION" >> $GITHUB_OUTPUT
+
+    # Fail early if the tag already exists — prevents overwriting a finalised release.
+    - name: Guard — Tag must not already exist
+      shell: bash
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        if git ls-remote --tags origin "refs/tags/$VERSION" | grep -q "$VERSION"; then
+          echo "::error::Tag $VERSION already exists — cannot create a new release for an existing tag."
+          echo "::error::Use workflow_dispatch with release_type=patch to increment, or delete the tag manually."
+          exit 1
+        fi
+        echo "::notice::Tag $VERSION is available"
+
+    # Fail if the branch exists without a PR — orphaned state requires manual intervention.
+    - name: Guard — Release branch must not already exist (auto-resolve orphaned)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        BRANCH="${{ steps.version.outputs.branch_name }}"
+        if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
+          HAS_PR=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq 'length' 2>/dev/null || echo "0")
+          if [ "$HAS_PR" = "0" ]; then
+            echo "::warning::Branch $BRANCH existe sem PR aberto (estado órfão) — deletando automaticamente e continuando"
+            gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH"
+            echo "::notice::Branch $BRANCH deletada. Prosseguindo com nova release."
+          else
+            echo "::error::Branch $BRANCH já tem um PR aberto. Feche ou faça merge do PR existente antes de criar uma nova release para esta versão."
+            exit 1
+          fi
+        else
+          echo "::notice::Branch $BRANCH disponível"
+        fi
+
+    - name: Generate Changelog
+      id: changelog
+      shell: bash
+      run: |
+        LAST_TAG=$(git tag --sort=-v:refname | head -n 1)
+        if [ -z "$LAST_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" | head -20)
+        else
+          CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)")
+        fi
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release Branch
+      shell: bash
+      run: |
+        BRANCH="${{ steps.version.outputs.branch_name }}"
+        git checkout -b "$BRANCH"
+        git push origin "$BRANCH"
+        echo "::notice::Created branch $BRANCH"
+
+    - name: Create Draft PR
+      id: create_pr
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+        BASE_BRANCH: ${{ inputs.base_branch }}
+        SOURCE_BRANCH: ${{ inputs.source_branch }}
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        BRANCH="${{ steps.version.outputs.branch_name }}"
+
+        gh label create release --description "Release PR" --color "0E8A16" --force 2>/dev/null || true
+
+        {
+          echo "## Release $VERSION"
+          echo ""
+          echo "Automated release from \`$SOURCE_BRANCH\` branch."
+          echo "**Created:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "### Changelog"
+          echo "$CHANGELOG"
+          echo ""
+          echo "### Checklist"
+          echo "- [ ] Review changes"
+          echo "- [ ] Validate all tests passed"
+          echo "- [ ] Check documentation updates"
+          echo "- [ ] Ready to deploy"
+          echo ""
+          echo "### After Merge"
+          echo "- Release tag \`$VERSION\` will be created automatically"
+          echo "- Docker image will be published to ECR with tags \`${VERSION#v}\` and \`latest\`"
+          echo "- GitHub Release will be created"
+          echo ""
+          echo "---"
+          echo "*This PR is updated automatically on every push to \`$SOURCE_BRANCH\`. Mark as ready for review when all checks pass.*"
+        } > /tmp/pr_body.md
+
+        PR_URL=$(gh pr create \
+          --base "$BASE_BRANCH" \
+          --head "$BRANCH" \
+          --title "Release $VERSION" \
+          --draft \
+          --label release \
+          --body-file /tmp/pr_body.md)
+
+        echo "::notice::Draft PR created: $PR_URL"
+        echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT

@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: framecast-worker
+  labels:
+    app: framecast-worker
+spec:
+  replicas: 1  # KEDA (ScaledObject) controla o scaling; replicas é só o valor inicial
+  selector:
+    matchLabels:
+      app: framecast-worker
+  template:
+    metadata:
+      labels:
+        app: framecast-worker
+    spec:
+      containers:
+        - name: worker
+          image: PLACEHOLDER  # substituído em cada deploy por kubectl set image
+          envFrom:
+            - configMapRef:
+                name: framecast-worker-config
+            - secretRef:
+                name: framecast-worker-secret
+          env:
+            # Downward API: IP do nó → endpoint do Datadog Agent DaemonSet
+            - name: DD_AGENT_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://$(DD_AGENT_HOST):4317"
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
