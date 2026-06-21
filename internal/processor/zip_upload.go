@@ -17,7 +17,7 @@ import (
 // injetar um fake nos testes sem implementar manager.UploadAPIClient inteiro
 // quando só queremos validar a orquestração (zip + erro de upload).
 type uploader interface {
-	Upload(ctx context.Context, input *s3.PutObjectInput, opts ...func(*manager.Uploader)) (*manager.UploadOutput, error)
+	Upload(ctx context.Context, input *s3.PutObjectInput, opts ...func(*manager.Uploader)) (*manager.UploadOutput, error) //nolint:staticcheck // transfermanager (substituto) ainda é experimental no aws-sdk-go-v2
 }
 
 // zipAndUpload faz streaming do ZIP diretamente para S3 via io.Pipe, sem

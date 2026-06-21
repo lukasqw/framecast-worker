@@ -20,7 +20,7 @@ type fakeUploader struct {
 	err       error
 }
 
-func (f *fakeUploader) Upload(_ context.Context, input *s3.PutObjectInput, _ ...func(*manager.Uploader)) (*manager.UploadOutput, error) {
+func (f *fakeUploader) Upload(_ context.Context, input *s3.PutObjectInput, _ ...func(*manager.Uploader)) (*manager.UploadOutput, error) { //nolint:staticcheck // assinatura precisa casar com a interface uploader (zip_upload.go)
 	f.lastInput = input
 	// Sempre drena o pipe — como o s3manager.Uploader real, que lê o body por
 	// completo mesmo quando o upload acaba falhando. Sem isso, o produtor

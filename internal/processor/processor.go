@@ -41,7 +41,7 @@ func New(
 	return &Processor{
 		db:                   db,
 		s3Client:             s3Client,
-		uploader:             manager.NewUploader(s3Client),
+		uploader:             manager.NewUploader(s3Client), //nolint:staticcheck // transfermanager (substituto) ainda é experimental no aws-sdk-go-v2
 		sqsClient:            sqsClient,
 		queueURL:             queueURL,
 		workerID:             hostname,
