@@ -31,14 +31,21 @@ type Handler interface {
 	Process(ctx context.Context, msg *Message, receiptHandle string) error
 }
 
+// sqsAPI é o subconjunto do *sqs.Client usado pelo consumer. *sqs.Client satisfaz
+// essa interface automaticamente — só os testes precisam de um fake.
+type sqsAPI interface {
+	ReceiveMessage(ctx context.Context, params *sqs.ReceiveMessageInput, optFns ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error)
+	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+}
+
 type Consumer struct {
-	sqs         *sqs.Client
+	sqs         sqsAPI
 	queueURL    string
 	concurrency int
 	handler     Handler
 }
 
-func New(sqsClient *sqs.Client, queueURL string, concurrency int, handler Handler) *Consumer {
+func New(sqsClient sqsAPI, queueURL string, concurrency int, handler Handler) *Consumer {
 	return &Consumer{
 		sqs:         sqsClient,
 		queueURL:    queueURL,

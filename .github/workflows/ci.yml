@@ -49,7 +49,7 @@ jobs:
         uses: ./.github/actions/ci/go-test
         with:
           go_version: ${{ vars.GO_VERSION || '1.25' }}
-          coverage_gate: ${{ vars.COVERAGE_GATE || '60' }}
+          coverage_gate: ${{ vars.COVERAGE_GATE || '85' }}
 
   build:
     name: Build

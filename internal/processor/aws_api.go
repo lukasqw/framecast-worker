@@ -1,0 +1,35 @@
+package processor
+
+import (
+	"context"
+
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+)
+
+// s3API é o subconjunto do *s3.Client usado pelo processor: download (GetObject)
+// e upload do ZIP via s3manager (manager.UploadAPIClient). *s3.Client satisfaz essa
+// interface automaticamente — só os testes precisam de um fake.
+type s3API interface {
+	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+	manager.UploadAPIClient
+}
+
+// sqsAPI é o subconjunto do *sqs.Client usado pelo processor (ACK + heartbeat) e
+// pelo DLQ handler (ACK).
+type sqsAPI interface {
+	DeleteMessage(ctx context.Context, params *sqs.DeleteMessageInput, optFns ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error)
+	ChangeMessageVisibility(ctx context.Context, params *sqs.ChangeMessageVisibilityInput, optFns ...func(*sqs.Options)) (*sqs.ChangeMessageVisibilityOutput, error)
+}
+
+// sesAPI é o subconjunto do *sesv2.Client usado pelo notifier.
+type sesAPI interface {
+	SendEmail(ctx context.Context, params *sesv2.SendEmailInput, optFns ...func(*sesv2.Options)) (*sesv2.SendEmailOutput, error)
+}
+
+// s3GetAPI é o subconjunto usado só pelo downloader.
+type s3GetAPI interface {
+	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+}

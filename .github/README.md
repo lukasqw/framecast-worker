@@ -34,7 +34,7 @@ push to develop
 
 | Workflow | Trigger | Descrição |
 |---|---|---|
-| `ci.yml` | PR para `develop`/`main`, push em `develop` | Lint → Test (FFmpeg + coverage ≥60%) → Build |
+| `ci.yml` | PR para `develop`/`main`, push em `develop` | Lint → Test (unit, mocks/fakes + coverage ≥85%) → Build |
 | `release.yml` | Push em `develop`, `workflow_dispatch` | Cria ou atualiza PR de release |
 | `deploy.yml` | PR de `release/*` mergeado em `main`, `workflow_dispatch` | Docker push → dev → prod (gate manual) → GitHub Release |
 | `rollback.yml` | `workflow_dispatch` (versão + ambiente) | Redeployment da imagem de uma versão anterior |
@@ -45,7 +45,7 @@ push to develop
 .github/actions/
 ├── ci/
 │   ├── go-lint/        go vet + golangci-lint
-│   ├── go-test/        FFmpeg install + testes + coverage gate + vulnerability check
+│   ├── go-test/        testes unitários (mocks/fakes, sem infra) + coverage gate + vulnerability check
 │   └── go-build/       build binary + docker smoke test
 ├── release/
 │   ├── create-pr/      calcula versão (conventional commits), cria branch e draft PR
@@ -72,7 +72,7 @@ Veja [`variables.env.example`](variables.env.example) para a lista completa.
 | `EKS_CLUSTER` | `framecast` |
 | `K8S_NAMESPACE` | `framecast` |
 | `K8S_NAMESPACE_DEV` | `framecast-dev` |
-| `COVERAGE_GATE` | `60` |
+| `COVERAGE_GATE` | `85` |
 | `HEALTH_ENDPOINT` | `/health` |
 
 ### Secrets obrigatórios
@@ -85,8 +85,8 @@ Veja [`variables.env.example`](variables.env.example) para a lista completa.
 
 ## Peculiaridades do worker vs api
 
-- **FFmpeg no CI:** o `go-test` action instala FFmpeg antes de rodar os testes (necessário para testes de integração do pipeline de vídeo).
-- **Coverage gate:** mínimo de 60% de cobertura (`COVERAGE_GATE`).
+- **Testes 100% unitários:** todas as dependências externas (Postgres via GORM, S3/SQS/SES, FFmpeg) são mockadas via interfaces estreitas + `go-sqlmock`; o `go-test` action não precisa instalar FFmpeg nem subir infraestrutura.
+- **Coverage gate:** mínimo de 85% de cobertura (`COVERAGE_GATE`), calculado sobre todos os pacotes exceto `cmd/` (wiring de bootstrap).
 - **Deploy em 2 stages:** dev → prod com gate de aprovação manual no GitHub environment `production`.
 
 ## Versionamento

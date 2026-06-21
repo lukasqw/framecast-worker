@@ -10,8 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
 	"github.com/lukasqw/framecast-worker/internal/infra/observability"
@@ -21,8 +20,9 @@ import (
 // Processor implementa consumer.Handler.
 type Processor struct {
 	db                   *gorm.DB
-	s3Client             *s3.Client
-	sqsClient            *sqs.Client
+	s3Client             s3API
+	uploader             uploader
+	sqsClient            sqsAPI
 	queueURL             string
 	workerID             string
 	ffmpegTimeoutMinutes int
@@ -31,9 +31,9 @@ type Processor struct {
 
 func New(
 	db *gorm.DB,
-	s3Client *s3.Client,
-	sqsClient *sqs.Client,
-	sesClient *sesv2.Client,
+	s3Client s3API,
+	sqsClient sqsAPI,
+	sesClient sesAPI,
 	queueURL, fromEmail, sesRecipientOverride string,
 	ffmpegTimeoutMinutes int,
 ) *Processor {
@@ -41,6 +41,7 @@ func New(
 	return &Processor{
 		db:                   db,
 		s3Client:             s3Client,
+		uploader:             manager.NewUploader(s3Client),
 		sqsClient:            sqsClient,
 		queueURL:             queueURL,
 		workerID:             hostname,
@@ -116,7 +117,7 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	// ── ZIP streaming + upload S3 ─────────────────────────────────────────────
 	log.Info("fazendo upload do ZIP para S3", slog.String("bucket", msg.OutputBucket))
-	outputKey, err := zipAndUpload(ctx, p.s3Client, framesDir, msg.OutputBucket, msg.VideoID)
+	outputKey, err := zipAndUpload(ctx, p.uploader, framesDir, msg.OutputBucket, msg.VideoID)
 	if err != nil {
 		return fmt.Errorf("falha no zip+upload: %w", err) // retentável
 	}

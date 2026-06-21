@@ -11,12 +11,12 @@ import (
 )
 
 type notifier struct {
-	ses               *sesv2.Client
+	ses               sesAPI
 	fromEmail         string
 	recipientOverride string // dev: força todos os e-mails para um endereço fixo
 }
 
-func newNotifier(sesClient *sesv2.Client, fromEmail, recipientOverride string) *notifier {
+func newNotifier(sesClient sesAPI, fromEmail, recipientOverride string) *notifier {
 	return &notifier{ses: sesClient, fromEmail: fromEmail, recipientOverride: recipientOverride}
 }
 

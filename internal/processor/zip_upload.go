@@ -13,14 +13,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+// uploader é o subconjunto do manager.Uploader usado por zipAndUpload — permite
+// injetar um fake nos testes sem implementar manager.UploadAPIClient inteiro
+// quando só queremos validar a orquestração (zip + erro de upload).
+type uploader interface {
+	Upload(ctx context.Context, input *s3.PutObjectInput, opts ...func(*manager.Uploader)) (*manager.UploadOutput, error)
+}
+
 // zipAndUpload faz streaming do ZIP diretamente para S3 via io.Pipe, sem
 // materializar o arquivo em disco.
 //
 // Goroutine A: itera os frames PNG em framesDir → zip.Writer → pipe.Writer
-// Goroutine B (inline): s3manager.Uploader lê do pipe.Reader → S3 PutObject
+// Goroutine B (inline): up (s3manager.Uploader em produção) lê do pipe.Reader → S3 PutObject
 //
 // Retorna a chave S3 do ZIP gerado (ex.: "<videoID>.zip").
-func zipAndUpload(ctx context.Context, s3Client *s3.Client, framesDir, bucket, videoID string) (string, error) {
+func zipAndUpload(ctx context.Context, up uploader, framesDir, bucket, videoID string) (string, error) {
 	outputKey := videoID + ".zip"
 	pr, pw := io.Pipe()
 
@@ -36,8 +43,7 @@ func zipAndUpload(ctx context.Context, s3Client *s3.Client, framesDir, bucket, v
 		zipErrCh <- err
 	}()
 
-	uploader := manager.NewUploader(s3Client)
-	_, uploadErr := uploader.Upload(ctx, &s3.PutObjectInput{
+	_, uploadErr := up.Upload(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(bucket),
 		Key:         aws.String(outputKey),
 		Body:        pr,

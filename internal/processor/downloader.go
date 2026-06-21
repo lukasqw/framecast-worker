@@ -11,7 +11,7 @@ import (
 )
 
 // downloadVideo faz streaming do objeto S3 diretamente para destPath em disco.
-func downloadVideo(ctx context.Context, s3Client *s3.Client, bucket, key, destPath string) error {
+func downloadVideo(ctx context.Context, s3Client s3GetAPI, bucket, key, destPath string) error {
 	out, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),

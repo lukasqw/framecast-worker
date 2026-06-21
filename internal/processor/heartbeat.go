@@ -10,10 +10,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	heartbeatInterval  = 1 * time.Minute // renova lease no banco e visibility no SQS
-	heartbeatExtension = int32(15 * 60)  // estende visibilidade para 15 min
-)
+const heartbeatExtension = int32(15 * 60) // estende visibilidade para 15 min
+
+// heartbeatInterval é var (não const) para permitir interval curto nos testes.
+var heartbeatInterval = 1 * time.Minute // renova lease no banco e visibility no SQS
 
 // startHeartbeat lança uma goroutine que, a cada heartbeatInterval:
 //   - renova a visibilidade da mensagem SQS (evita reentrega enquanto processa);
@@ -21,7 +21,7 @@ const (
 //     está vivo — usado pelo acquireLease de outros workers (P1-6).
 //
 // Retorna uma função de cancelamento — chamar via defer ao fim do processamento.
-func startHeartbeat(ctx context.Context, sqsClient *sqs.Client, queueURL, receiptHandle string, db *gorm.DB, videoID string) context.CancelFunc {
+func startHeartbeat(ctx context.Context, sqsClient sqsAPI, queueURL, receiptHandle string, db *gorm.DB, videoID string) context.CancelFunc {
 	hbCtx, cancel := context.WithCancel(ctx)
 
 	go func() {

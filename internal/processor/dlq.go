@@ -6,7 +6,6 @@ import (
 	"log/slog"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
 	"gorm.io/gorm"
@@ -19,12 +18,12 @@ const dlqErrorReason = "Processamento falhou após múltiplas tentativas (mensag
 // para falhas de infraestrutura que esgotaram o maxReceiveCount.
 type DLQHandler struct {
 	db       *gorm.DB
-	sqs      *sqs.Client
+	sqs      sqsAPI
 	queueURL string
 	notifier *notifier
 }
 
-func NewDLQHandler(db *gorm.DB, sqsClient *sqs.Client, sesClient *sesv2.Client, dlqURL, fromEmail, recipientOverride string) *DLQHandler {
+func NewDLQHandler(db *gorm.DB, sqsClient sqsAPI, sesClient sesAPI, dlqURL, fromEmail, recipientOverride string) *DLQHandler {
 	return &DLQHandler{
 		db:       db,
 		sqs:      sqsClient,

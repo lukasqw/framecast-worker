@@ -1,5 +1,5 @@
 name: 'CI — Go Test'
-description: 'Tests with FFmpeg + coverage gate + vulnerability check'
+description: 'Unit tests (mocks/fakes, sem infra externa) + coverage gate + vulnerability check'
 
 inputs:
   go_version:
@@ -9,7 +9,7 @@ inputs:
   coverage_gate:
     description: 'Minimum coverage % (must be ≥ this value)'
     required: false
-    default: '60'
+    default: '85'
 
 runs:
   using: composite
@@ -20,13 +20,10 @@ runs:
         go-version: ${{ inputs.go_version }}
         cache: true
 
-    - name: Install FFmpeg
-      shell: bash
-      run: sudo apt-get install -y ffmpeg
-
     - name: Run tests
       shell: bash
-      run: go test ./... -race -coverprofile=cover.out -covermode=atomic
+      # cmd/ é só wiring de bootstrap — excluído do cálculo de cobertura.
+      run: go test $(go list ./... | grep -v /cmd/) -race -coverprofile=cover.out -covermode=atomic
 
     - name: Coverage gate
       shell: bash
