@@ -31,6 +31,12 @@ inputs:
   db_password:
     description: 'RDS master password (used to assemble DATABASE_URL)'
     required: true
+  github_actor:
+    description: 'GitHub actor (GHCR username, for the image pull secret)'
+    required: true
+  ghcr_pat:
+    description: 'GHCR token (read:packages, for the image pull secret)'
+    required: true
   image:
     description: 'Full Docker image URI (used as APP_VERSION label)'
     required: true
@@ -115,6 +121,18 @@ runs:
           -n ${{ inputs.k8s_namespace }} \
           --dry-run=client -o yaml | kubectl apply -f -
         echo "::notice::ConfigMap framecast-worker-config aplicado"
+
+    - name: Apply GHCR Pull Secret
+      shell: bash
+      run: |
+        kubectl create secret docker-registry ghcr-secret \
+          --docker-server=ghcr.io \
+          --docker-username=${{ inputs.github_actor }} \
+          --docker-password=${{ inputs.ghcr_pat }} \
+          --docker-email=${{ inputs.github_actor }}@users.noreply.github.com \
+          -n ${{ inputs.k8s_namespace }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+        echo "::notice::Secret ghcr-secret aplicado"
 
     - name: Apply Secret
       shell: bash

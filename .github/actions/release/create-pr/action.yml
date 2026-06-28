@@ -175,7 +175,7 @@ runs:
           echo ""
           echo "### After Merge"
           echo "- Release tag \`$VERSION\` will be created automatically"
-          echo "- Docker image will be published to ECR with tags \`${VERSION#v}\` and \`latest\`"
+          echo "- Docker image will be published to GHCR (\`ghcr.io/<owner>/<repo>\`) with tags \`${VERSION#v}\` and \`latest\`"
           echo "- GitHub Release will be created"
           echo ""
           echo "---"

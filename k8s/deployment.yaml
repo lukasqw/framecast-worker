@@ -14,6 +14,8 @@ spec:
       labels:
         app: framecast-worker
     spec:
+      imagePullSecrets:
+        - name: ghcr-secret
       containers:
         - name: worker
           image: PLACEHOLDER  # substituído em cada deploy por kubectl set image

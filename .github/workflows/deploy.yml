@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
   pull-requests: write
 
 concurrency:
@@ -28,13 +29,15 @@ concurrency:
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
   ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   # ===========================================
-  # STAGE 1: Build & Push Docker image to ECR
+  # STAGE 1: Build & Push Docker image to GHCR
   # ===========================================
   docker-push:
-    name: Build & Push ECR
+    name: Build & Push GHCR
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
@@ -70,6 +73,7 @@ jobs:
           [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]     && MISSING+=("AWS_ACCESS_KEY_ID")
           [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && MISSING+=("AWS_SECRET_ACCESS_KEY")
           [ -z "${{ secrets.DB_PASSWORD }}" ]            && MISSING+=("DB_PASSWORD")
+          [ -z "${{ secrets.GHCR_PAT }}" ]               && MISSING+=("GHCR_PAT")
           if [ ${#MISSING[@]} -gt 0 ]; then
             echo "::error::Required secrets missing: ${MISSING[*]}"
             exit 1
@@ -79,12 +83,11 @@ jobs:
         id: push
         uses: ./.github/actions/deploy/docker-push
         with:
-          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws_region: ${{ env.AWS_REGION }}
-          ecr_repository: ${{ vars.ECR_REPOSITORY || 'framecast-worker' }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
           image_tag: ${{ github.sha }}
+          github_actor: ${{ github.actor }}
+          ghcr_pat: ${{ secrets.GHCR_PAT }}
 
   # ===========================================
   # STAGE 2: Deploy to dev
@@ -112,6 +115,8 @@ jobs:
           k8s_namespace: ${{ vars.K8S_NAMESPACE_DEV || 'framecast-dev' }}
           tf_state_bucket: ${{ vars.TF_STATE_BUCKET || 'fiap-soat-tf-backend-framecast' }}
           db_password: ${{ secrets.DB_PASSWORD }}
+          github_actor: ${{ github.actor }}
+          ghcr_pat: ${{ secrets.GHCR_PAT }}
           image: ${{ needs.docker-push.outputs.image }}
           worker_concurrency: ${{ vars.WORKER_CONCURRENCY || '3' }}
           ffmpeg_timeout_minutes: ${{ vars.FFMPEG_TIMEOUT_MINUTES || '10' }}
@@ -159,6 +164,8 @@ jobs:
           k8s_namespace: ${{ vars.K8S_NAMESPACE || 'framecast' }}
           tf_state_bucket: ${{ vars.TF_STATE_BUCKET || 'fiap-soat-tf-backend-framecast' }}
           db_password: ${{ secrets.DB_PASSWORD }}
+          github_actor: ${{ github.actor }}
+          ghcr_pat: ${{ secrets.GHCR_PAT }}
           image: ${{ needs.docker-push.outputs.image }}
           worker_concurrency: ${{ vars.WORKER_CONCURRENCY || '3' }}
           ffmpeg_timeout_minutes: ${{ vars.FFMPEG_TIMEOUT_MINUTES || '10' }}
