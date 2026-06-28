@@ -77,6 +77,8 @@ runs:
     - name: Read DB Terraform State
       id: db
       shell: bash
+      env:
+        DB_PASSWORD: ${{ inputs.db_password }}
       run: |
         aws s3 cp \
           "s3://${{ inputs.tf_state_bucket }}/framecast/db/terraform.tfstate" \
@@ -85,7 +87,8 @@ runs:
         RDS_PORT=$(jq -r     '.outputs.rds_port.value'           /tmp/db.tfstate)
         RDS_DATABASE=$(jq -r '.outputs.rds_database_name.value'  /tmp/db.tfstate)
         RDS_USERNAME=$(jq -r '.outputs.rds_username.value'       /tmp/db.tfstate)
-        DB_URL="postgres://${RDS_USERNAME}:${{ inputs.db_password }}@${RDS_ADDRESS}:${RDS_PORT}/${RDS_DATABASE}?sslmode=require"
+        ENC_PW=$(jq -rn --arg p "$DB_PASSWORD" '$p|@uri')
+        DB_URL="postgres://${RDS_USERNAME}:${ENC_PW}@${RDS_ADDRESS}:${RDS_PORT}/${RDS_DATABASE}?sslmode=require"
         echo "database_url=$DB_URL" >> $GITHUB_OUTPUT
         echo "::notice::DB state lido com sucesso (host: $RDS_ADDRESS)"
 

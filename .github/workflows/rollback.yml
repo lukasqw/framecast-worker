@@ -18,7 +18,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 # Same concurrency group as deploy — prevents a rollback from running alongside a deploy.
 concurrency:
