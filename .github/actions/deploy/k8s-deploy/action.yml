@@ -60,6 +60,8 @@ runs:
         kubectl set image deployment/${{ inputs.k8s_deployment }} \
           ${{ inputs.container_name }}=${{ inputs.image }} \
           -n ${{ inputs.k8s_namespace }}
+        kubectl rollout restart deployment/${{ inputs.k8s_deployment }} \
+          -n ${{ inputs.k8s_namespace }}
         kubectl rollout status deployment/${{ inputs.k8s_deployment }} \
           -n ${{ inputs.k8s_namespace }} \
           --timeout=5m

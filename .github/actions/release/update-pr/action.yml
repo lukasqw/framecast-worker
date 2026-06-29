@@ -55,9 +55,9 @@ runs:
         VERSION="${{ inputs.pr_branch }}"
         VERSION="${VERSION#release/}"
 
-        LAST_TAG=$(git tag --sort=-v:refname | head -n 1)
+        LAST_TAG=$(git tag --sort=-v:refname | sed -n '1p')
         if [ -z "$LAST_TAG" ]; then
-          CHANGELOG=$(git log --pretty=format:"- %s (%h)" | head -20)
+          CHANGELOG=$(git log --max-count=20 --pretty=format:"- %s (%h)")
         else
           CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)")
         fi

@@ -84,7 +84,7 @@ jobs:
             --state open \
             --json number,headRefName \
             | jq -r '.[] | select(.headRefName | startswith("release/")) | "\(.number)|\(.headRefName)"' \
-            | head -1)
+            | sed -n '1p')
 
           if [ -n "$PR_DATA" ]; then
             PR_NUMBER=$(echo "$PR_DATA" | cut -d'|' -f1)

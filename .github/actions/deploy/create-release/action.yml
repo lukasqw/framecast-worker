@@ -37,7 +37,7 @@ runs:
         GH_TOKEN: ${{ inputs.github_token }}
       run: |
         VERSION="${{ inputs.version }}"
-        LAST_TAG=$(git tag --sort=-v:refname | grep -v "^${VERSION}$" | head -n 1)
+        LAST_TAG=$(git tag --sort=-v:refname | grep -v "^${VERSION}$" | sed -n '1p')
 
         {
           echo "## Release $VERSION"
@@ -53,7 +53,7 @@ runs:
           if [ -n "$LAST_TAG" ]; then
             git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)"
           else
-            git log --pretty=format:"- %s (%h)" | head -20
+            git log --max-count=20 --pretty=format:"- %s (%h)"
           fi
         } > /tmp/release_notes.md
 

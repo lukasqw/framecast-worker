@@ -59,7 +59,7 @@ jobs:
         id: version
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            TAG=$(git tag --sort=-v:refname | head -n 1 || echo "v0.0.0")
+            TAG=$(git tag --sort=-v:refname | sed -n '1p'); TAG="${TAG:-v0.0.0}"
           else
             BRANCH="${{ github.event.pull_request.head.ref }}"
             TAG="${BRANCH#release/}"

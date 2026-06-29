@@ -20,6 +20,10 @@ runs:
         go-version: ${{ inputs.go_version }}
         cache: true
 
+    - name: go mod tidy
+      shell: bash
+      run: go mod tidy
+
     - name: Run tests
       shell: bash
       # cmd/ é só wiring de bootstrap — excluído do cálculo de cobertura.

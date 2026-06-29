@@ -16,12 +16,16 @@ runs:
         go-version: ${{ inputs.go_version }}
         cache: true
 
+    - name: go mod tidy
+      shell: bash
+      run: go mod tidy
+
     - name: go vet
       shell: bash
       run: go vet ./...
 
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v6
-      with:
-        version: latest
-        args: --timeout=5m
+      shell: bash
+      run: |
+        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        "$(go env GOPATH)/bin/golangci-lint" run --timeout=5m
