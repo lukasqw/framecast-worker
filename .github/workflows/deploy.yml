@@ -33,16 +33,15 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # ===========================================
-  # STAGE 1: Build & Push Docker image to GHCR
-  # ===========================================
-  docker-push:
-    name: Build & Push GHCR
+  deploy:
+    name: Deploy
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
 
     outputs:
       version: ${{ steps.version.outputs.VERSION }}
@@ -79,6 +78,9 @@ jobs:
             exit 1
           fi
 
+      # ===========================================
+      # STAGE 1: Build & Push Docker image to GHCR
+      # ===========================================
       - name: Build & Push Docker Image
         id: push
         uses: ./.github/actions/deploy/docker-push
@@ -89,71 +91,10 @@ jobs:
           github_actor: ${{ github.actor }}
           ghcr_pat: ${{ secrets.GHCR_PAT }}
 
-  # ===========================================
-  # STAGE 2: Deploy to dev
-  # ===========================================
-  deploy-dev:
-    name: Deploy → dev
-    needs: docker-push
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment:
-      name: development
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure K8s Resources (dev)
-        uses: ./.github/actions/deploy/k8s-configure
-        with:
-          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws_region: ${{ env.AWS_REGION }}
-          eks_cluster: ${{ vars.EKS_CLUSTER || 'framecast' }}
-          k8s_namespace: ${{ vars.K8S_NAMESPACE_DEV || 'framecast-dev' }}
-          tf_state_bucket: ${{ vars.TF_STATE_BUCKET || 'fiap-soat-tf-backend-framecast' }}
-          db_password: ${{ secrets.DB_PASSWORD }}
-          github_actor: ${{ github.actor }}
-          ghcr_pat: ${{ secrets.GHCR_PAT }}
-          image: ${{ needs.docker-push.outputs.image }}
-          worker_concurrency: ${{ vars.WORKER_CONCURRENCY || '3' }}
-          ffmpeg_timeout_minutes: ${{ vars.FFMPEG_TIMEOUT_MINUTES || '10' }}
-
-      - name: Deploy to EKS (dev)
-        uses: ./.github/actions/deploy/k8s-deploy
-        with:
-          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws_region: ${{ env.AWS_REGION }}
-          eks_cluster: ${{ vars.EKS_CLUSTER || 'framecast' }}
-          k8s_namespace: ${{ vars.K8S_NAMESPACE_DEV || 'framecast-dev' }}
-          k8s_deployment: framecast-worker
-          container_name: worker
-          image: ${{ needs.docker-push.outputs.image }}
-          health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
-
-  # ===========================================
-  # STAGE 3: Deploy to production (manual gate)
-  # ===========================================
-  deploy-prod:
-    name: Deploy → production
-    needs: [docker-push, deploy-dev]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment:
-      name: production
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: main
-
-      - name: Configure K8s Resources (prod)
+      # ===========================================
+      # STAGE 2: Wire Terraform outputs → K8s
+      # ===========================================
+      - name: Configure K8s Resources
         uses: ./.github/actions/deploy/k8s-configure
         with:
           aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -166,11 +107,14 @@ jobs:
           db_password: ${{ secrets.DB_PASSWORD }}
           github_actor: ${{ github.actor }}
           ghcr_pat: ${{ secrets.GHCR_PAT }}
-          image: ${{ needs.docker-push.outputs.image }}
+          image: ${{ steps.push.outputs.image }}
           worker_concurrency: ${{ vars.WORKER_CONCURRENCY || '3' }}
           ffmpeg_timeout_minutes: ${{ vars.FFMPEG_TIMEOUT_MINUTES || '10' }}
 
-      - name: Deploy to EKS (prod)
+      # ===========================================
+      # STAGE 3: Roll out new image
+      # ===========================================
+      - name: Deploy to EKS
         uses: ./.github/actions/deploy/k8s-deploy
         with:
           aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -181,17 +125,17 @@ jobs:
           k8s_namespace: ${{ vars.K8S_NAMESPACE || 'framecast' }}
           k8s_deployment: framecast-worker
           container_name: worker
-          image: ${{ needs.docker-push.outputs.image }}
+          image: ${{ steps.push.outputs.image }}
           health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
 
       - name: Create Release
         if: github.event_name != 'workflow_dispatch'
         uses: ./.github/actions/deploy/create-release
         with:
-          version: ${{ needs.docker-push.outputs.version }}
+          version: ${{ steps.version.outputs.VERSION }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          image: ${{ needs.docker-push.outputs.image }}
-          environment: production
+          image: ${{ steps.push.outputs.image }}
+          environment: ${{ env.ENVIRONMENT }}
 
       - name: Deployment Summary
         if: always()
@@ -201,8 +145,9 @@ jobs:
             echo ""
             echo "| Resource | Value |"
             echo "|----------|-------|"
-            echo "| Version | \`${{ needs.docker-push.outputs.version }}\` |"
-            echo "| Image | \`${{ needs.docker-push.outputs.image }}\` |"
+            echo "| Version | \`${{ steps.version.outputs.VERSION }}\` |"
+            echo "| Environment | \`${{ env.ENVIRONMENT }}\` |"
+            echo "| Image | \`${{ steps.push.outputs.image }}\` |"
             echo "| Region | \`${{ env.AWS_REGION }}\` |"
             echo ""
             echo "| | |"
