@@ -14,7 +14,10 @@ import (
 const (
 	visibilityTimeoutSec = 15 * 60 // 15 min
 	waitTimeSeconds      = 20
-	maxMessages          = 1
+	// Busca até 10 mensagens por chamada SQS: com WORKER_CONCURRENCY=3, os 3 primeiros
+	// slots são preenchidos imediatamente e os demais ficam no batch local, eliminando
+	// RTTs de SQS extras enquanto goroutines terminam.
+	maxMessages = 10
 )
 
 // Message é o payload publicado pelo outbox dispatcher da api.
