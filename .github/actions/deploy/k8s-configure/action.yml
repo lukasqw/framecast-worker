@@ -48,6 +48,30 @@ inputs:
     description: 'FFmpeg execution timeout in minutes'
     required: false
     default: '10'
+  notifier_backend:
+    description: 'Notifier backend: smtp (default) or ses'
+    required: false
+    default: 'smtp'
+  smtp_host:
+    description: 'SMTP host (e.g. sandbox.smtp.mailtrap.io)'
+    required: false
+    default: 'sandbox.smtp.mailtrap.io'
+  smtp_port:
+    description: 'SMTP port'
+    required: false
+    default: '2525'
+  smtp_username:
+    description: 'SMTP username'
+    required: false
+    default: ''
+  smtp_from:
+    description: 'SMTP from address'
+    required: false
+    default: 'noreply@framecast.local'
+  smtp_password:
+    description: 'SMTP password (secret)'
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -77,7 +101,6 @@ runs:
         echo "sqs_queue_url=$(jq -r '.outputs.sqs_queue_url.value'      /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
         echo "s3_bucket_raw=$(jq -r '.outputs.s3_bucket_raw.value'       /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
         echo "s3_bucket_output=$(jq -r '.outputs.s3_bucket_output.value'  /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
-        echo "ses_from_email=$(jq -r '.outputs.ses_from_identity.value'   /tmp/infra.tfstate)" >> $GITHUB_OUTPUT
         echo "::notice::Infra state lido com sucesso"
 
     - name: Read DB Terraform State
@@ -112,7 +135,11 @@ runs:
           --from-literal=S3_BUCKET_RAW=${{ steps.infra.outputs.s3_bucket_raw }} \
           --from-literal=S3_BUCKET_OUTPUT=${{ steps.infra.outputs.s3_bucket_output }} \
           --from-literal=SQS_QUEUE_URL=${{ steps.infra.outputs.sqs_queue_url }} \
-          --from-literal=SES_FROM_EMAIL=${{ steps.infra.outputs.ses_from_email }} \
+          --from-literal=NOTIFIER_BACKEND=${{ inputs.notifier_backend }} \
+          --from-literal=SMTP_HOST=${{ inputs.smtp_host }} \
+          --from-literal=SMTP_PORT=${{ inputs.smtp_port }} \
+          --from-literal=SMTP_USERNAME=${{ inputs.smtp_username }} \
+          --from-literal=SMTP_FROM=${{ inputs.smtp_from }} \
           --from-literal=WORKER_CONCURRENCY=${{ inputs.worker_concurrency }} \
           --from-literal=FFMPEG_TIMEOUT_MINUTES=${{ inputs.ffmpeg_timeout_minutes }} \
           --from-literal=APP_ENV=production \
@@ -142,6 +169,7 @@ runs:
           --from-literal=AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }} \
           --from-literal=AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }} \
           --from-literal=AWS_SESSION_TOKEN=${{ inputs.aws_session_token }} \
+          --from-literal=SMTP_PASSWORD=${{ inputs.smtp_password }} \
           -n ${{ inputs.k8s_namespace }} \
           --dry-run=client -o yaml | kubectl apply -f -
         echo "::notice::Secret framecast-worker-secret aplicado"

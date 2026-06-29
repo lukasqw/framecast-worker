@@ -110,6 +110,12 @@ jobs:
           image: ${{ steps.push.outputs.image }}
           worker_concurrency: ${{ vars.WORKER_CONCURRENCY || '3' }}
           ffmpeg_timeout_minutes: ${{ vars.FFMPEG_TIMEOUT_MINUTES || '10' }}
+          notifier_backend: ${{ vars.NOTIFIER_BACKEND || 'smtp' }}
+          smtp_host: ${{ vars.SMTP_HOST || 'sandbox.smtp.mailtrap.io' }}
+          smtp_port: ${{ vars.SMTP_PORT || '2525' }}
+          smtp_username: ${{ vars.SMTP_USERNAME || '' }}
+          smtp_from: ${{ vars.SMTP_FROM || 'noreply@framecast.local' }}
+          smtp_password: ${{ secrets.SMTP_PASSWORD }}
 
       # ===========================================
       # STAGE 3: Roll out new image

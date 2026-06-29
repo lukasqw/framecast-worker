@@ -81,7 +81,7 @@ func TestLoad_FaltandoObrigatorias(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 	for _, want := range []string{
-		"DATABASE_URL", "S3_BUCKET_RAW", "S3_BUCKET_OUTPUT", "SQS_QUEUE_URL", "SES_FROM_EMAIL",
+		"DATABASE_URL", "S3_BUCKET_RAW", "S3_BUCKET_OUTPUT", "SQS_QUEUE_URL",
 	} {
 		assert.Contains(t, err.Error(), want)
 	}
