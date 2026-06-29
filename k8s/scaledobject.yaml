@@ -7,13 +7,14 @@ spec:
     name: framecast-worker
   minReplicaCount: 1    # 1 pod sempre pronto — evita cold start na demo
   maxReplicaCount: 10
-  pollingInterval: 10   # verifica fila a cada 10s (era 30s) — reage mais rápido a picos
-  cooldownPeriod: 60    # aguarda 1min antes de escalar para baixo (era 120s)
+  pollingInterval: 10   # verifica fila a cada 10s — reage rápido a picos
+  cooldownPeriod: 60    # aguarda 1min antes de escalar para baixo
   triggers:
     - type: aws-sqs-queue
+      authenticationRef:
+        name: keda-aws-trigger-auth   # usa credenciais do framecast-worker-secret (sem IMDS)
       metadata:
         queueURL: SQS_QUEUE_URL_PLACEHOLDER   # substituído pelo k8s-configure
-        queueLength: "3"                       # 1 pod por 3 mensagens (era 5) — escala mais agressivo
+        queueLength: "3"                       # 1 pod por 3 mensagens na fila
         awsRegion: AWS_REGION_PLACEHOLDER      # substituído pelo k8s-configure
-        identityOwner: operator               # KEDA usa LabRole do node (sem IRSA)
         scaleOnInFlight: "true"               # conta mensagens em processamento (invisíveis no SQS)

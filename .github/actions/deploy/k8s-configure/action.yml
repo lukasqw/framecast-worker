@@ -152,6 +152,12 @@ runs:
         kubectl apply -f k8s/deployment.yaml -n ${{ inputs.k8s_namespace }}
         echo "::notice::Deployment aplicado"
 
+    - name: Apply KEDA TriggerAuthentication
+      shell: bash
+      run: |
+        kubectl apply -f k8s/trigger-auth.yaml -n ${{ inputs.k8s_namespace }}
+        echo "::notice::KEDA TriggerAuthentication aplicado (usa framecast-worker-secret)"
+
     - name: Apply KEDA ScaledObject
       shell: bash
       run: |
