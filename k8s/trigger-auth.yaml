@@ -1,0 +1,15 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-aws-trigger-auth
+spec:
+  secretTargetRef:
+    - parameter: awsAccessKeyID
+      name: framecast-worker-secret
+      key: AWS_ACCESS_KEY_ID
+    - parameter: awsSecretAccessKey
+      name: framecast-worker-secret
+      key: AWS_SECRET_ACCESS_KEY
+    - parameter: awsSessionToken
+      name: framecast-worker-secret
+      key: AWS_SESSION_TOKEN
