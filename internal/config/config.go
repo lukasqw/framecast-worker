@@ -14,6 +14,7 @@ type Config struct {
 	AWSRegion          string
 	AWSAccessKeyID     string
 	AWSSecretAccessKey string
+	AWSSessionToken    string
 
 	S3BucketRaw    string
 	S3BucketOutput string
@@ -41,6 +42,7 @@ func Load() (*Config, error) {
 		AWSRegion:            getEnvOrDefault("AWS_REGION", "us-east-1"),
 		AWSAccessKeyID:       os.Getenv("AWS_ACCESS_KEY_ID"),
 		AWSSecretAccessKey:   os.Getenv("AWS_SECRET_ACCESS_KEY"),
+		AWSSessionToken:      os.Getenv("AWS_SESSION_TOKEN"),
 		S3BucketRaw:          os.Getenv("S3_BUCKET_RAW"),
 		S3BucketOutput:       os.Getenv("S3_BUCKET_OUTPUT"),
 		SQSQueueURL:          os.Getenv("SQS_QUEUE_URL"),
