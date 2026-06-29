@@ -72,7 +72,7 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	log.Info("lease adquirido", slog.Int("attempt", row.Attempt))
 
-	stopHeartbeat := startHeartbeat(ctx, p.sqsClient, p.queueURL, receiptHandle, p.db, msg.VideoID)
+	stopHeartbeat := startHeartbeat(ctx, p.sqsClient, p.queueURL, receiptHandle, p.db, msg.VideoID, heartbeatInterval)
 	defer stopHeartbeat()
 
 	// ── Diretório temporário — limpo sempre ao final ──────────────────────────
