@@ -80,17 +80,13 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Resolve the ECR image that was pushed at this commit.
+      # Resolve the GHCR image that was pushed at this commit.
       # Images are tagged with the git SHA, so we can reconstruct the URI.
-      - name: Resolve ECR Image
+      - name: Resolve GHCR Image
         id: image
         run: |
           COMMIT_SHA=$(git rev-parse HEAD)
-          REGISTRY=$(aws ecr describe-repositories \
-            --repository-names ${{ vars.ECR_REPOSITORY || 'framecast-worker' }} \
-            --query 'repositories[0].repositoryUri' \
-            --output text)
-          IMAGE="${REGISTRY}:${COMMIT_SHA}"
+          IMAGE="ghcr.io/${{ github.repository }}:${COMMIT_SHA}"
           echo "image=$IMAGE" >> $GITHUB_OUTPUT
           echo "::notice::Rolling back to image: $IMAGE"
 

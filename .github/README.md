@@ -18,7 +18,7 @@ push to develop
          [deploy.yml]
               │
               ▼
-      docker-push (build + ECR)
+      docker-push (build + GHCR)
               │
               ▼
       deploy-dev (development) ──► aprovação manual
@@ -52,7 +52,7 @@ push to develop
 │   ├── update-pr/      sincroniza branch de release com develop, atualiza changelog
 │   └── finalize-tag/   cria tag anotada (chamada por create-release)
 └── deploy/
-    ├── docker-push/    ECR login + build + push (tags: sha + latest)
+    ├── docker-push/    GHCR login + build + push (tags: sha + latest)
     ├── k8s-deploy/     kubectl set image + rollout status + health check
     └── create-release/ finalize-tag + GitHub Release com changelog
 ```
@@ -68,7 +68,6 @@ Veja [`variables.env.example`](variables.env.example) para a lista completa.
 |---|---|
 | `AWS_REGION` | `us-east-1` |
 | `GO_VERSION` | `1.25` |
-| `ECR_REPOSITORY` | `framecast-worker` |
 | `EKS_CLUSTER` | `framecast` |
 | `K8S_NAMESPACE` | `framecast` |
 | `K8S_NAMESPACE_DEV` | `framecast-dev` |
@@ -82,6 +81,7 @@ Veja [`variables.env.example`](variables.env.example) para a lista completa.
 | `AWS_ACCESS_KEY_ID` | Credencial AWS |
 | `AWS_SECRET_ACCESS_KEY` | Credencial AWS |
 | `AWS_SESSION_TOKEN` | Sessão temporária (AWS Academy / LabRole) |
+| `GHCR_PAT` | PAT clássico com escopo `write:packages` — usado para push da imagem e como pull secret (`ghcr-secret`) no cluster |
 
 ## Peculiaridades do worker vs api
 
@@ -110,4 +110,4 @@ A tag e o GitHub Release são criados **após** o deploy em produção ser confi
 - **Concorrência:** `group: deploy` — nunca executa dois deploys em paralelo.
 - **KEDA:** o ScaledObject no EKS escala o worker conforme a profundidade da fila SQS (`framecast-processing`). `minReplicaCount: 1` garante 1 pod sempre pronto.
 - **Pré-requisito:** `framecast-infra` deve estar aplicado (provê EKS, SQS, S3, SES).
-- **Rollback:** usa o SHA do commit da tag para localizar a imagem ECR exata.
+- **Rollback:** usa o SHA do commit da tag para reconstruir a imagem GHCR exata (`ghcr.io/<owner>/<repo>:<commit-sha>`).
