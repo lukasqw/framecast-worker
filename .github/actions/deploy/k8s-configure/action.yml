@@ -139,6 +139,9 @@ runs:
       run: |
         kubectl create secret generic framecast-worker-secret \
           --from-literal=DATABASE_URL=${{ steps.db.outputs.database_url }} \
+          --from-literal=AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }} \
+          --from-literal=AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }} \
+          --from-literal=AWS_SESSION_TOKEN=${{ inputs.aws_session_token }} \
           -n ${{ inputs.k8s_namespace }} \
           --dry-run=client -o yaml | kubectl apply -f -
         echo "::notice::Secret framecast-worker-secret aplicado"
