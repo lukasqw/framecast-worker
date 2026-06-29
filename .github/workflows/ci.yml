@@ -67,3 +67,25 @@ jobs:
           go_version: ${{ vars.GO_VERSION || '1.25' }}
           binary_name: framecast-worker
           cmd_path: ./cmd/worker
+
+  # ===========================================
+  # STAGE 3: SonarQube (após test)
+  # ===========================================
+  sonarqube:
+    name: SonarQube
+    needs: test
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: ./.github/actions/quality/sonarqube
+        with:
+          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          sonar_host_url: ${{ vars.SONAR_HOST_URL }}

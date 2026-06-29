@@ -5,7 +5,7 @@ metadata:
 spec:
   scaleTargetRef:
     name: framecast-worker
-  minReplicaCount: 1    # 1 pod sempre pronto — evita cold start na demo
+  minReplicaCount: 2    # 2 pods sempre prontos — reduz cold start e distribui carga inicial
   maxReplicaCount: 10
   pollingInterval: 10   # verifica fila a cada 10s — reage rápido a picos
   cooldownPeriod: 60    # aguarda 1min antes de escalar para baixo

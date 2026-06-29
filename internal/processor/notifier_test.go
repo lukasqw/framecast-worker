@@ -2,64 +2,36 @@ package processor
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	"github.com/lukasqw/framecast-worker/internal/infra/email"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-type fakeSES struct {
-	lastInput *sesv2.SendEmailInput
-	err       error
+func TestMockNotifier_CapturaSuccessCalls(t *testing.T) {
+	m := &email.MockNotifier{}
+	m.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
+
+	require.Len(t, m.SuccessCalls, 1)
+	assert.Equal(t, "user@example.com", m.SuccessCalls[0].ToEmail)
+	assert.Equal(t, "v1", m.SuccessCalls[0].VideoID)
+	assert.Equal(t, "video.mp4", m.SuccessCalls[0].Detail)
 }
 
-func (f *fakeSES) SendEmail(_ context.Context, params *sesv2.SendEmailInput, _ ...func(*sesv2.Options)) (*sesv2.SendEmailOutput, error) {
-	f.lastInput = params
-	if f.err != nil {
-		return nil, f.err
-	}
-	return &sesv2.SendEmailOutput{}, nil
+func TestMockNotifier_CapturaFailureCalls(t *testing.T) {
+	m := &email.MockNotifier{}
+	m.SendFailure(context.Background(), "user@example.com", "v1", "ffmpeg error")
+
+	require.Len(t, m.FailureCalls, 1)
+	assert.Equal(t, "v1", m.FailureCalls[0].VideoID)
+	assert.Equal(t, "ffmpeg error", m.FailureCalls[0].Detail)
 }
 
-func TestNotifier_SendSuccess_EnviaParaDestinatario(t *testing.T) {
-	ses := &fakeSES{}
-	n := newNotifier(ses, "noreply@framecast.local", "")
-
-	n.sendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
-
-	require.NotNil(t, ses.lastInput)
-	assert.Equal(t, "noreply@framecast.local", aws.ToString(ses.lastInput.FromEmailAddress))
-	assert.Equal(t, []string{"user@example.com"}, ses.lastInput.Destination.ToAddresses)
-}
-
-func TestNotifier_SendFailure_EnviaParaDestinatario(t *testing.T) {
-	ses := &fakeSES{}
-	n := newNotifier(ses, "noreply@framecast.local", "")
-
-	n.sendFailure(context.Background(), "user@example.com", "v1", "ffmpeg falhou")
-
-	require.NotNil(t, ses.lastInput)
-	assert.Equal(t, []string{"user@example.com"}, ses.lastInput.Destination.ToAddresses)
-}
-
-func TestNotifier_RecipientOverride_RedirecionaEmail(t *testing.T) {
-	ses := &fakeSES{}
-	n := newNotifier(ses, "noreply@framecast.local", "dev-catchall@example.com")
-
-	n.sendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
-
-	require.NotNil(t, ses.lastInput)
-	assert.Equal(t, []string{"dev-catchall@example.com"}, ses.lastInput.Destination.ToAddresses)
-}
-
-func TestNotifier_ErroDoSES_NaoPropaga(t *testing.T) {
-	ses := &fakeSES{err: errors.New("ses indisponível")}
-	n := newNotifier(ses, "noreply@framecast.local", "")
-
-	// best-effort: não deve panicar nem retornar erro (sem valor de retorno)
-	n.sendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
-	n.sendFailure(context.Background(), "user@example.com", "v1", "erro qualquer")
+func TestMockNotifier_Reset(t *testing.T) {
+	m := &email.MockNotifier{}
+	m.SendSuccess(context.Background(), "a@b.com", "v1", "f.mp4")
+	m.Reset()
+	assert.Empty(t, m.SuccessCalls)
+	assert.Empty(t, m.FailureCalls)
 }

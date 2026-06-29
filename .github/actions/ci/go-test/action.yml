@@ -39,6 +39,13 @@ runs:
           exit 1
         fi
 
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: cover.out
+        retention-days: 1
+
     - name: Vulnerability check
       shell: bash
       run: |
