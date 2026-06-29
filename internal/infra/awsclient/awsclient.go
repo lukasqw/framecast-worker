@@ -26,7 +26,7 @@ func New(ctx context.Context, cfg *appconfig.Config) (*Clients, error) {
 
 	if cfg.AWSAccessKeyID != "" && cfg.AWSSecretAccessKey != "" {
 		opts = append(opts, config.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(cfg.AWSAccessKeyID, cfg.AWSSecretAccessKey, ""),
+			credentials.NewStaticCredentialsProvider(cfg.AWSAccessKeyID, cfg.AWSSecretAccessKey, cfg.AWSSessionToken),
 		))
 	}
 
