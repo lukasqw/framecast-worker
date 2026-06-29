@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
+	"github.com/lukasqw/framecast-worker/internal/infra/email"
 	"gorm.io/gorm"
 )
 
@@ -20,15 +21,15 @@ type DLQHandler struct {
 	db       *gorm.DB
 	sqs      sqsAPI
 	queueURL string
-	notifier *notifier
+	notifier email.Notifier
 }
 
-func NewDLQHandler(db *gorm.DB, sqsClient sqsAPI, sesClient sesAPI, dlqURL, fromEmail, recipientOverride string) *DLQHandler {
+func NewDLQHandler(db *gorm.DB, sqsClient sqsAPI, notif email.Notifier, dlqURL string) *DLQHandler {
 	return &DLQHandler{
 		db:       db,
 		sqs:      sqsClient,
 		queueURL: dlqURL,
-		notifier: newNotifier(sesClient, fromEmail, recipientOverride),
+		notifier: notif,
 	}
 }
 
@@ -69,7 +70,7 @@ func (h *DLQHandler) Process(ctx context.Context, msg *consumer.Message, receipt
 		log.Info("vídeo já finalizado — apenas descartando mensagem da DLQ")
 	} else {
 		if userEmail != "" {
-			h.notifier.sendFailure(ctx, userEmail, msg.VideoID, dlqErrorReason)
+			h.notifier.SendFailure(ctx, userEmail, msg.VideoID, dlqErrorReason)
 		}
 		log.Info("vídeo marcado como ERROR via DLQ e usuário notificado")
 	}

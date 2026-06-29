@@ -13,6 +13,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
+	"github.com/lukasqw/framecast-worker/internal/infra/email"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -52,7 +53,7 @@ type processorTestDeps struct {
 	s3   *fakeS3Full
 	up   *fakeUploader
 	sqs  *fakeHeartbeatSQS
-	ses  *fakeSES
+	notif *email.MockNotifier
 }
 
 func newTestProcessor(t *testing.T) (*Processor, *processorTestDeps) {
@@ -61,7 +62,7 @@ func newTestProcessor(t *testing.T) (*Processor, *processorTestDeps) {
 	s3Fake := &fakeS3Full{getObjectBody: "video-bytes"}
 	up := &fakeUploader{}
 	sqsFake := &fakeHeartbeatSQS{}
-	ses := &fakeSES{}
+	notif := &email.MockNotifier{}
 
 	p := &Processor{
 		db:                   db,
@@ -71,9 +72,9 @@ func newTestProcessor(t *testing.T) (*Processor, *processorTestDeps) {
 		queueURL:             "queue-url",
 		workerID:             "worker-1",
 		ffmpegTimeoutMinutes: 30,
-		notifier:             newNotifier(ses, "noreply@framecast.local", ""),
+		notifier:             notif,
 	}
-	return p, &processorTestDeps{mock: mock, s3: s3Fake, up: up, sqs: sqsFake, ses: ses}
+	return p, &processorTestDeps{mock: mock, s3: s3Fake, up: up, sqs: sqsFake, notif: notif}
 }
 
 func testMsg() *consumer.Message {
@@ -168,7 +169,7 @@ func TestProcess_FFmpegFalha_MarcaErroNotificaEDeleta(t *testing.T) {
 
 	err := p.Process(context.Background(), testMsg(), "receipt-1")
 	require.NoError(t, err) // não-retentável: Process devolve nil (ACK)
-	require.NotNil(t, deps.ses.lastInput)
+	require.Len(t, deps.notif.FailureCalls, 1)
 	assert.Contains(t, deps.sqs.deletedReceiptsList(), "receipt-1")
 	require.NoError(t, deps.mock.ExpectationsWereMet())
 }
@@ -209,7 +210,7 @@ func TestProcess_SucessoCompleto(t *testing.T) {
 
 	err := p.Process(context.Background(), testMsg(), "receipt-1")
 	require.NoError(t, err)
-	require.NotNil(t, deps.ses.lastInput)
+	require.Len(t, deps.notif.SuccessCalls, 1)
 	assert.Contains(t, deps.sqs.deletedReceiptsList(), "receipt-1")
 	require.NotNil(t, deps.up.lastInput)
 	require.NoError(t, deps.mock.ExpectationsWereMet())

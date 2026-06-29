@@ -22,8 +22,19 @@ type Config struct {
 	SQSQueueURL string
 	SQSDLQURL   string // opcional: se definida, ativa o consumer da DLQ (marca ERROR + e-mail)
 
+	// Notifier backend: "smtp" (padrão) ou "ses" (requer SES configurado — não funciona no Academy).
+	NotifierBackend string
+
+	// SMTP — usado quando NotifierBackend="smtp". Dev: sem credenciais imprime no stdout.
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+
+	// SES — usado quando NotifierBackend="ses". Mantido para ambientes com SES habilitado.
 	SESFromEmail         string
-	SESRecipientOverride string // dev: redireciona todos os e-mails para este endereço
+	SESRecipientOverride string
 
 	WorkerConcurrency    int
 	FFmpegTimeoutMinutes int
@@ -47,6 +58,12 @@ func Load() (*Config, error) {
 		S3BucketOutput:       os.Getenv("S3_BUCKET_OUTPUT"),
 		SQSQueueURL:          os.Getenv("SQS_QUEUE_URL"),
 		SQSDLQURL:            os.Getenv("SQS_DLQ_URL"),
+		NotifierBackend:      getEnvOrDefault("NOTIFIER_BACKEND", "smtp"),
+		SMTPHost:             getEnvOrDefault("SMTP_HOST", "sandbox.smtp.mailtrap.io"),
+		SMTPPort:             getEnvOrDefault("SMTP_PORT", "2525"),
+		SMTPUsername:         os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:         os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:             getEnvOrDefault("SMTP_FROM", "noreply@framecast.local"),
 		SESFromEmail:         os.Getenv("SES_FROM_EMAIL"),
 		SESRecipientOverride: os.Getenv("SES_RECIPIENT_OVERRIDE"),
 		OTelEndpoint:         os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
@@ -85,8 +102,8 @@ func (c *Config) validate() error {
 	if c.SQSQueueURL == "" {
 		errs = append(errs, errors.New("SQS_QUEUE_URL é obrigatório"))
 	}
-	if c.SESFromEmail == "" {
-		errs = append(errs, errors.New("SES_FROM_EMAIL é obrigatório"))
+	if c.NotifierBackend == "ses" && c.SESFromEmail == "" {
+		errs = append(errs, errors.New("SES_FROM_EMAIL é obrigatório quando NOTIFIER_BACKEND=ses"))
 	}
 
 	if len(errs) > 0 {

@@ -23,10 +23,10 @@ runs:
       run: |
         VERSION="${{ inputs.version }}"
 
-        if git tag -a "$VERSION" -m "Release $VERSION"; then
+        if git rev-parse "$VERSION" >/dev/null 2>&1; then
+          echo "::notice::Tag $VERSION already exists — skipping (idempotent redeploy)"
+        else
+          git tag -a "$VERSION" -m "Release $VERSION"
           git push origin "$VERSION"
           echo "::notice::Tag $VERSION created — release finalised"
-        else
-          echo "::error::Failed to create tag $VERSION — it may already exist or there is a push permission issue"
-          exit 1
         fi

@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
+	"github.com/lukasqw/framecast-worker/internal/infra/email"
 	"github.com/lukasqw/framecast-worker/internal/infra/observability"
 	"gorm.io/gorm"
 )
@@ -26,15 +27,15 @@ type Processor struct {
 	queueURL             string
 	workerID             string
 	ffmpegTimeoutMinutes int
-	notifier             *notifier
+	notifier             email.Notifier
 }
 
 func New(
 	db *gorm.DB,
 	s3Client s3API,
 	sqsClient sqsAPI,
-	sesClient sesAPI,
-	queueURL, fromEmail, sesRecipientOverride string,
+	notif email.Notifier,
+	queueURL string,
 	ffmpegTimeoutMinutes int,
 ) *Processor {
 	hostname, _ := os.Hostname()
@@ -46,7 +47,7 @@ func New(
 		queueURL:             queueURL,
 		workerID:             hostname,
 		ffmpegTimeoutMinutes: ffmpegTimeoutMinutes,
-		notifier:             newNotifier(sesClient, fromEmail, sesRecipientOverride),
+		notifier:             notif,
 	}
 }
 
@@ -106,7 +107,7 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 		userEmail, _ := p.getUserEmail(ctx, row.UserID)
 		p.markError(ctx, msg.VideoID, err.Error())
 		if userEmail != "" {
-			p.notifier.sendFailure(ctx, userEmail, msg.VideoID, err.Error())
+			p.notifier.SendFailure(ctx, userEmail, msg.VideoID, err.Error())
 		}
 		observability.RecordVideoProcessed(ctx, "error")
 		return p.deleteMessage(ctx, receiptHandle)
@@ -130,7 +131,7 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	// ── Notificação de sucesso (best-effort) ──────────────────────────────────
 	if userEmail, err := p.getUserEmail(ctx, row.UserID); err == nil && userEmail != "" {
-		p.notifier.sendSuccess(ctx, userEmail, msg.VideoID, row.OriginalName)
+		p.notifier.SendSuccess(ctx, userEmail, msg.VideoID, row.OriginalName)
 	}
 
 	observability.RecordVideoProcessed(ctx, "done")

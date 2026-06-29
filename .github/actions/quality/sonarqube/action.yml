@@ -1,0 +1,36 @@
+name: 'Quality — SonarQube Scan'
+description: 'Downloads coverage artifact and runs SonarQube analysis'
+
+inputs:
+  sonar_token:
+    description: 'SonarQube authentication token'
+    required: true
+  sonar_host_url:
+    description: 'SonarQube server URL'
+    required: true
+  branch_name:
+    description: 'Branch name to report to SonarQube'
+    required: false
+    default: 'main'
+  coverage_artifact_name:
+    description: 'Name of the uploaded coverage artifact'
+    required: false
+    default: 'coverage-report'
+
+runs:
+  using: composite
+  steps:
+    - name: Download Coverage
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.coverage_artifact_name }}
+
+    - name: SonarQube Scan
+      uses: sonarsource/sonarqube-scan-action@v2
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar_token }}
+        SONAR_HOST_URL: ${{ inputs.sonar_host_url }}
+      with:
+        args: >
+          -Dsonar.branch.name=${{ inputs.branch_name }}
+          -Dsonar.go.coverage.reportPaths=cover.out

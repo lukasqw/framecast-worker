@@ -127,6 +127,83 @@ docker compose -f docker-compose.dev.yml up
 
 ---
 
+## Testando o envio de e-mail (SES)
+
+### Testes unitários (sem infra)
+
+```bash
+go test ./internal/processor/... -v -run TestNotifier
+```
+
+Usa `fakeSES` (implementação da interface `sesAPI`) — valida subject, body e destinatário sem precisar de AWS.
+
+### LocalStack (dev local)
+
+O `docker-compose.dev.yml` já sobe o LocalStack com SES simulado. Não entrega email real, mas valida que `SendEmail` é chamado com os parâmetros corretos.
+
+```env
+AWS_ENDPOINT_URL=http://localhost:4566
+SES_FROM_EMAIL=noreply@framecast.local
+SES_RECIPIENT_OVERRIDE=qualquer@email.com
+```
+
+### AWS real — sandbox (AWS Academy)
+
+> **AWS Academy mantém SES em sandbox mode permanentemente.** Não é possível solicitar saída do sandbox. Restrições: remetente e destinatário precisam ser endereços verificados no SES; limite de 200 emails/dia.
+
+**Passo 1 — Verificar remetente e destinatário**
+
+```bash
+# Verificar o email que será usado como remetente e destinatário
+aws ses verify-email-identity \
+  --email-address seuemail@gmail.com \
+  --region us-east-1
+
+# Clicar no link de verificação que chega na caixa de entrada
+# Confirmar que ficou verificado:
+aws ses get-identity-verification-attributes \
+  --identities seuemail@gmail.com \
+  --region us-east-1
+# Deve retornar "VerificationStatus": "Success"
+```
+
+**Passo 2 — Configurar `.env` para AWS real**
+
+```env
+# AWS real (sem override de endpoint)
+AWS_ENDPOINT_URL=
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=<do lab>
+AWS_SECRET_ACCESS_KEY=<do lab>
+AWS_SESSION_TOKEN=<do lab>
+
+# SES — usar o email verificado no passo 1
+SES_FROM_EMAIL=seuemail@gmail.com
+SES_RECIPIENT_OVERRIDE=seuemail@gmail.com   # redireciona TODOS os emails para você
+
+# Infra real
+SQS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/<account-id>/framecast-processing
+S3_BUCKET_RAW=framecast-videos-raw
+S3_BUCKET_OUTPUT=framecast-videos-output
+DATABASE_URL=postgres://framecast:<senha>@<rds-endpoint>:5432/framecast_db?sslmode=require
+```
+
+**Passo 3 — Rodar o worker e disparar um vídeo**
+
+```bash
+go run ./cmd/worker
+```
+
+Faça upload pela `framecast-api` — o outbox dispatcher publica na fila e o worker processa. Com `SES_RECIPIENT_OVERRIDE` setado, **todos** os emails chegam no seu endereço independente do usuário que fez o upload, contornando a restrição de destinatário verificado do sandbox.
+
+| Evento | Email recebido |
+|---|---|
+| FFmpeg conclui com sucesso | "Seu vídeo está pronto para download" |
+| FFmpeg falha (codec/timeout) | "Falha no processamento do seu vídeo" |
+| Mensagem vai para DLQ (3x) | "Falha no processamento do seu vídeo" (via DLQHandler) |
+
+---
+
 ## Métricas OTel
 
 | Métrica | Tipo | Atributos |

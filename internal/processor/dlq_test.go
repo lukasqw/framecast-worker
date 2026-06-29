@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
+	"github.com/lukasqw/framecast-worker/internal/infra/email"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -31,8 +32,8 @@ func (f *fakeDLQSQS) ChangeMessageVisibility(context.Context, *sqs.ChangeMessage
 	return &sqs.ChangeMessageVisibilityOutput{}, nil
 }
 
-func newDLQHandlerForTest(db *gorm.DB, sqsFake sqsAPI, ses sesAPI) *DLQHandler {
-	return &DLQHandler{db: db, sqs: sqsFake, queueURL: "dlq-url", notifier: newNotifier(ses, "noreply@framecast.local", "")}
+func newDLQHandlerForTest(db *gorm.DB, sqsFake sqsAPI, notif *email.MockNotifier) *DLQHandler {
+	return &DLQHandler{db: db, sqs: sqsFake, queueURL: "dlq-url", notifier: notif}
 }
 
 func TestDLQHandler_VideoJaFinalizado(t *testing.T) {
@@ -44,13 +45,13 @@ func TestDLQHandler_VideoJaFinalizado(t *testing.T) {
 	mock.ExpectCommit()
 
 	sqsFake := &fakeDLQSQS{}
-	ses := &fakeSES{}
-	h := newDLQHandlerForTest(db, sqsFake, ses)
+	notif := &email.MockNotifier{}
+	h := newDLQHandlerForTest(db, sqsFake, notif)
 
 	err := h.Process(context.Background(), &consumer.Message{VideoID: "v1"}, "receipt-1")
 	require.NoError(t, err)
 	assert.Contains(t, sqsFake.deletedReceipts, "receipt-1")
-	assert.Nil(t, ses.lastInput)
+	assert.Empty(t, notif.FailureCalls)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -69,13 +70,13 @@ func TestDLQHandler_MarcaErrorENotifica(t *testing.T) {
 	mock.ExpectCommit()
 
 	sqsFake := &fakeDLQSQS{}
-	ses := &fakeSES{}
-	h := newDLQHandlerForTest(db, sqsFake, ses)
+	notif := &email.MockNotifier{}
+	h := newDLQHandlerForTest(db, sqsFake, notif)
 
 	err := h.Process(context.Background(), &consumer.Message{VideoID: "v1"}, "receipt-1")
 	require.NoError(t, err)
-	require.NotNil(t, ses.lastInput)
-	assert.Equal(t, []string{"user@example.com"}, ses.lastInput.Destination.ToAddresses)
+	require.Len(t, notif.FailureCalls, 1)
+	assert.Equal(t, "user@example.com", notif.FailureCalls[0].ToEmail)
 	assert.Contains(t, sqsFake.deletedReceipts, "receipt-1")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -89,8 +90,8 @@ func TestDLQHandler_ErroNaTransacao_NaoDeleta(t *testing.T) {
 	mock.ExpectRollback()
 
 	sqsFake := &fakeDLQSQS{}
-	ses := &fakeSES{}
-	h := newDLQHandlerForTest(db, sqsFake, ses)
+	notif := &email.MockNotifier{}
+	h := newDLQHandlerForTest(db, sqsFake, notif)
 
 	err := h.Process(context.Background(), &consumer.Message{VideoID: "v1"}, "receipt-1")
 	require.Error(t, err)
@@ -107,8 +108,8 @@ func TestDLQHandler_ErroAoDeletarMensagem(t *testing.T) {
 	mock.ExpectCommit()
 
 	sqsFake := &fakeDLQSQS{deleteErr: errors.New("sqs indisponível")}
-	ses := &fakeSES{}
-	h := newDLQHandlerForTest(db, sqsFake, ses)
+	notif := &email.MockNotifier{}
+	h := newDLQHandlerForTest(db, sqsFake, notif)
 
 	err := h.Process(context.Background(), &consumer.Message{VideoID: "v1"}, "receipt-1")
 	require.Error(t, err)
