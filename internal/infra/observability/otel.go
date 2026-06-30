@@ -21,9 +21,15 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+var otelInitialized bool
+
+// OTelInitialized indica se o provider foi inicializado com exporter real.
+func OTelInitialized() bool { return otelInitialized }
 
 // InitOTel configura TracerProvider + MeterProvider com exportadores OTLP gRPC.
 // Endpoint vazio → modo no-op (dev sem Datadog).
@@ -97,6 +103,8 @@ func InitOTel(ctx context.Context) (shutdown func(context.Context) error, err er
 		return nil, fmt.Errorf("falha ao inicializar métricas: %w", err)
 	}
 
+	otelInitialized = true
+
 	return func(ctx context.Context) error {
 		var errs []error
 		if err := tracerProvider.Shutdown(ctx); err != nil {
@@ -121,12 +129,30 @@ func SpanWorker(ctx context.Context, operation string) (context.Context, trace.S
 	return Tracer().Start(ctx, operation)
 }
 
+// SpanConsumer cria um span com SpanKindConsumer para recebimento de mensagens SQS.
+func SpanConsumer(ctx context.Context, operation string) (context.Context, trace.Span) {
+	return Tracer().Start(ctx, operation, trace.WithSpanKind(trace.SpanKindConsumer))
+}
+
+// InitNoop inicializa OTel com providers no-op — para testes que precisam de spans
+// ativos sem exporter real. Retorna cleanup que reverte otelInitialized para false.
+func InitNoop() func() {
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+	otelInitialized = true
+	return func() { otelInitialized = false }
+}
+
 // Métricas de negócio do worker
 var (
-	videoProcessedCounter metric.Int64Counter
-	videoProcessingHisto  metric.Float64Histogram
-	videoFrameCountHisto  metric.Int64Histogram
-	ffmpegDurationHisto   metric.Float64Histogram
+	videoProcessedCounter  metric.Int64Counter
+	videoProcessingHisto   metric.Float64Histogram
+	videoFrameCountHisto   metric.Int64Histogram
+	ffmpegDurationHisto    metric.Float64Histogram
+	sqsMessagesCounter     metric.Int64Counter
 )
 
 func initMetrics(m metric.Meter) error {
@@ -162,6 +188,13 @@ func initMetrics(m metric.Meter) error {
 		return err
 	}
 
+	if sqsMessagesCounter, err = m.Int64Counter(
+		"framecast.worker.sqs.messages.received",
+		metric.WithDescription("Total de mensagens SQS recebidas pelo worker"),
+	); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -186,5 +219,11 @@ func RecordFrameCount(ctx context.Context, count int64) {
 func RecordFFmpegDuration(ctx context.Context, seconds float64) {
 	if ffmpegDurationHisto != nil {
 		ffmpegDurationHisto.Record(ctx, seconds)
+	}
+}
+
+func RecordSQSMessagesReceived(ctx context.Context, count int64) {
+	if sqsMessagesCounter != nil {
+		sqsMessagesCounter.Add(ctx, count)
 	}
 }

@@ -47,7 +47,7 @@ runs:
           ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.image_tag }}
           ${{ inputs.registry }}/${{ inputs.image_name }}:latest
         cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-to: type=gha,mode=max,ignore-error=true
 
     - name: Set Image URI Output
       id: image_uri
