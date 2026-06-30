@@ -15,3 +15,8 @@ vendor/
 .idea/
 .vscode/
 *.swp
+
+# Testes
+*.out
+cover.out
+coverage.out

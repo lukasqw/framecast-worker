@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	appconfig "github.com/lukasqw/framecast-worker/internal/config"
+	obs "github.com/lukasqw/framecast-worker/internal/infra/observability"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -23,6 +24,12 @@ func Connect(cfg *appconfig.Config) (*gorm.DB, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("falha ao conectar ao banco: %w", err)
+	}
+
+	if obs.OTelInitialized() {
+		if err := db.Use(newOTelPlugin()); err != nil {
+			return nil, fmt.Errorf("falha ao registrar plugin OTel no GORM: %w", err)
+		}
 	}
 
 	slog.Info("banco de dados conectado")
