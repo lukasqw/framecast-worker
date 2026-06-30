@@ -89,4 +89,3 @@ jobs:
         with:
           sonar_token: ${{ secrets.SONAR_TOKEN }}
           sonar_host_url: ${{ vars.SONAR_HOST_URL }}
-          branch_name: ${{ github.head_ref || github.ref_name }}

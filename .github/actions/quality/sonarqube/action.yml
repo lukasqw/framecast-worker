@@ -33,4 +33,4 @@ runs:
       with:
         args: >
           -Dsonar.branch.name=${{ inputs.branch_name }}
-          -Dsonar.go.coverage.reportPaths=cover.out
+          -Dsonar.go.coverage.reportPaths=coverage.out
