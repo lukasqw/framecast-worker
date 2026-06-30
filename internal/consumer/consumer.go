@@ -9,6 +9,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/lukasqw/framecast-worker/internal/infra/observability"
+	"github.com/lukasqw/framecast-worker/internal/infra/sqscarrier"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const (
@@ -106,8 +111,24 @@ func (c *Consumer) Run(ctx context.Context) {
 				defer wg.Done()
 				defer func() { <-sem }()
 
-				if err := c.handler.Process(ctx, parsed, aws.ToString(sqsMsg.ReceiptHandle)); err != nil {
-					slog.Error("erro ao processar mensagem",
+				// Extrai trace context dos MessageAttributes e cria span consumer linkado à api.
+				carrier := sqscarrier.ExtractCarrier(sqsMsg.MessageAttributes)
+				msgCtx := otel.GetTextMapPropagator().Extract(ctx, carrier)
+				msgCtx, span := observability.SpanConsumer(msgCtx, "sqs.receive")
+				span.SetAttributes(
+					attribute.String("messaging.system", "aws_sqs"),
+					attribute.String("messaging.destination.name", c.queueURL),
+					attribute.String("messaging.message.id", aws.ToString(sqsMsg.MessageId)),
+					attribute.String("framecast.video_id", parsed.VideoID),
+				)
+				defer span.End()
+
+				observability.RecordSQSMessagesReceived(msgCtx, 1)
+
+				if err := c.handler.Process(msgCtx, parsed, aws.ToString(sqsMsg.ReceiptHandle)); err != nil {
+					span.RecordError(err)
+					span.SetStatus(codes.Error, err.Error())
+					observability.LoggerFromContext(msgCtx).Error("erro ao processar mensagem",
 						slog.String("video_id", parsed.VideoID),
 						slog.String("erro", err.Error()),
 					)
@@ -119,10 +140,11 @@ func (c *Consumer) Run(ctx context.Context) {
 
 func (c *Consumer) receive(ctx context.Context) ([]sqstypes.Message, error) {
 	out, err := c.sqs.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(c.queueURL),
-		MaxNumberOfMessages: maxMessages,
-		WaitTimeSeconds:     waitTimeSeconds,
-		VisibilityTimeout:   visibilityTimeoutSec,
+		QueueUrl:              aws.String(c.queueURL),
+		MaxNumberOfMessages:   maxMessages,
+		WaitTimeSeconds:       waitTimeSeconds,
+		VisibilityTimeout:     visibilityTimeoutSec,
+		MessageAttributeNames: sqscarrier.PropagationKeys,
 	})
 	if err != nil {
 		return nil, err
