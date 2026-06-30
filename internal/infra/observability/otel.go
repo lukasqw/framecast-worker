@@ -169,6 +169,8 @@ func initMetrics(m metric.Meter) error {
 		"framecast.video.processing.duration",
 		metric.WithDescription("Duração total de processamento de vídeo em segundos"),
 		metric.WithUnit("s"),
+		// Buckets em segundos: cobre sub-segundo até 30min com granularidade útil
+		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 900, 1800),
 	); err != nil {
 		return err
 	}
@@ -176,6 +178,7 @@ func initMetrics(m metric.Meter) error {
 	if videoFrameCountHisto, err = m.Int64Histogram(
 		"framecast.video.frame_count",
 		metric.WithDescription("Número de frames extraídos por vídeo"),
+		metric.WithExplicitBucketBoundaries(10, 50, 100, 250, 500, 1000, 2000, 5000, 10000),
 	); err != nil {
 		return err
 	}
@@ -184,6 +187,8 @@ func initMetrics(m metric.Meter) error {
 		"framecast.ffmpeg.duration",
 		metric.WithDescription("Duração da execução do FFmpeg em segundos"),
 		metric.WithUnit("s"),
+		// Buckets em segundos: FFmpeg costuma ser < 10min, mas cobre até 15min
+		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 900),
 	); err != nil {
 		return err
 	}

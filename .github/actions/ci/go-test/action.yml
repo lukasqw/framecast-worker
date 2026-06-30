@@ -27,12 +27,12 @@ runs:
     - name: Run tests
       shell: bash
       # cmd/ é só wiring de bootstrap — excluído do cálculo de cobertura.
-      run: go test $(go list ./... | grep -v /cmd/) -race -coverprofile=cover.out -covermode=atomic
+      run: go test $(go list ./... | grep -v /cmd/) -race -coverprofile=coverage.out -covermode=atomic
 
     - name: Coverage gate
       shell: bash
       run: |
-        COVERAGE=$(go tool cover -func=cover.out | grep total | awk '{print $3}' | tr -d '%')
+        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
         echo "Cobertura: ${COVERAGE}%"
         if (( $(echo "$COVERAGE < ${{ inputs.coverage_gate }}" | bc -l) )); then
           echo "::error::Cobertura abaixo do gate (${{ inputs.coverage_gate }}%): ${COVERAGE}%"
@@ -43,7 +43,7 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: coverage-report
-        path: cover.out
+        path: coverage.out
         retention-days: 1
 
     - name: Vulnerability check
