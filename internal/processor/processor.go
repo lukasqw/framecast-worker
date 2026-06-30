@@ -102,7 +102,6 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 		attribute.String("aws.s3.bucket", msg.Bucket),
 		attribute.String("aws.s3.key", msg.S3Key),
 	)
-	log.InfoContext(ctx, "baixando vídeo do S3", slog.String("bucket", msg.Bucket), slog.String("key", msg.S3Key))
 	dlErr := downloadVideo(ctx, p.s3Client, msg.Bucket, msg.S3Key, inputPath)
 	if dlErr != nil {
 		dlSpan.RecordError(dlErr)
@@ -119,7 +118,6 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 		return fmt.Errorf("falha ao criar diretório de frames: %w", err)
 	}
 
-	log.InfoContext(ctx, "executando FFmpeg")
 	ctx, ffSpan := observability.SpanWorker(ctx, "ffmpeg.execute")
 	ffmpegStart := time.Now()
 	frameCount, err := runFFmpeg(ctx, inputPath, framesDir, p.ffmpegTimeoutMinutes)
@@ -142,11 +140,9 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	ffSpan.SetAttributes(attribute.Int("ffmpeg.frame_count", frameCount))
 	ffSpan.End()
-	log.InfoContext(ctx, "frames extraídos", slog.Int("frames", frameCount))
 	observability.RecordFrameCount(ctx, int64(frameCount))
 
 	// ── ZIP streaming + upload S3 ─────────────────────────────────────────────
-	log.InfoContext(ctx, "fazendo upload do ZIP para S3", slog.String("bucket", msg.OutputBucket))
 	ctx, zipSpan := observability.SpanWorker(ctx, "zip.upload")
 	zipSpan.SetAttributes(attribute.String("aws.s3.bucket", msg.OutputBucket))
 	outputKey, err := zipAndUpload(ctx, p.uploader, framesDir, msg.OutputBucket, msg.VideoID)
@@ -158,7 +154,6 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 	}
 	zipSpan.SetAttributes(attribute.String("aws.s3.key", outputKey))
 	zipSpan.End()
-	log.InfoContext(ctx, "ZIP enviado", slog.String("key", outputKey))
 
 	// ── Finalização em transação ──────────────────────────────────────────────
 	if err := p.markDone(ctx, msg.VideoID, outputKey, frameCount); err != nil {
@@ -172,7 +167,6 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	observability.RecordVideoProcessed(ctx, "done")
 	observability.RecordVideoProcessingDuration(ctx, time.Since(start).Seconds(), "done")
-	log.InfoContext(ctx, "processamento concluído", slog.String("output_key", outputKey))
 
 	// ── ACK ───────────────────────────────────────────────────────────────────
 	return p.deleteMessage(ctx, receiptHandle)
