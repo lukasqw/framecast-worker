@@ -14,10 +14,11 @@ func TestNew_ConstroiProcessorComDependencias(t *testing.T) {
 	sqsFake := &fakeHeartbeatSQS{}
 	notif := &email.MockNotifier{}
 
-	p := New(db, s3Fake, sqsFake, notif, "queue-url", 30)
+	p := New(db, s3Fake, sqsFake, notif, "queue-url", 30, 1)
 	require.NotNil(t, p)
 	assert.Equal(t, "queue-url", p.queueURL)
 	assert.Equal(t, 30, p.ffmpegTimeoutMinutes)
+	assert.Equal(t, 1, p.ffmpegFPS)
 	assert.NotNil(t, p.notifier)
 	assert.NotNil(t, p.uploader)
 	assert.NotEmpty(t, p.workerID)

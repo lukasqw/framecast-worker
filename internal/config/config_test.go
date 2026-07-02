@@ -28,6 +28,7 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("DD_SERVICE", "")
 	t.Setenv("WORKER_CONCURRENCY", "")
 	t.Setenv("FFMPEG_TIMEOUT_MINUTES", "")
+	t.Setenv("FFMPEG_FPS", "")
 }
 
 func TestLoad_Sucesso(t *testing.T) {
@@ -53,6 +54,7 @@ func TestLoad_DefaultsAplicados(t *testing.T) {
 	assert.Equal(t, "framecast-worker", cfg.DDService)
 	assert.Equal(t, 1, cfg.WorkerConcurrency)
 	assert.Equal(t, 30, cfg.FFmpegTimeoutMinutes)
+	assert.Equal(t, 1, cfg.FFmpegFPS)
 }
 
 func TestLoad_ValoresCustomizados(t *testing.T) {
@@ -61,6 +63,7 @@ func TestLoad_ValoresCustomizados(t *testing.T) {
 	t.Setenv("APP_ENV", "prod")
 	t.Setenv("WORKER_CONCURRENCY", "5")
 	t.Setenv("FFMPEG_TIMEOUT_MINUTES", "10")
+	t.Setenv("FFMPEG_FPS", "2")
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -68,6 +71,7 @@ func TestLoad_ValoresCustomizados(t *testing.T) {
 	assert.Equal(t, "prod", cfg.AppEnv)
 	assert.Equal(t, 5, cfg.WorkerConcurrency)
 	assert.Equal(t, 10, cfg.FFmpegTimeoutMinutes)
+	assert.Equal(t, 2, cfg.FFmpegFPS)
 }
 
 func TestLoad_FaltandoObrigatorias(t *testing.T) {
@@ -112,4 +116,13 @@ func TestLoad_FFmpegTimeoutInvalido(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FFMPEG_TIMEOUT_MINUTES")
+}
+
+func TestLoad_FFmpegFPSInvalido(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("FFMPEG_FPS", "0")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "FFMPEG_FPS")
 }

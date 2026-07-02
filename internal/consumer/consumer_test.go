@@ -63,6 +63,7 @@ type fakeHandler struct {
 	processed   []string
 	err         error
 	delay       time.Duration
+	panicOn     string
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
 }
@@ -79,6 +80,10 @@ func (h *fakeHandler) Process(ctx context.Context, msg *Message, receiptHandle s
 
 	if h.delay > 0 {
 		time.Sleep(h.delay)
+	}
+
+	if h.panicOn != "" && msg.VideoID == h.panicOn {
+		panic("falha simulada no processamento de " + msg.VideoID)
 	}
 
 	h.mu.Lock()
@@ -123,6 +128,23 @@ func TestConsumer_DescartaMensagemInvalida(t *testing.T) {
 	handler.mu.Lock()
 	defer handler.mu.Unlock()
 	assert.Empty(t, handler.processed)
+}
+
+func TestConsumer_PanicEmUmaMensagemNaoDerrubaOutras(t *testing.T) {
+	sqsFake := &fakeSQS{receiveQueue: [][]sqstypes.Message{
+		{validMsg("v1", "r1"), validMsg("v2", "r2")},
+	}}
+	handler := &fakeHandler{panicOn: "v1"}
+	c := New(sqsFake, "queue-url", 2, handler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	c.Run(ctx)
+
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	assert.Contains(t, handler.processed, "v2")
+	assert.NotContains(t, sqsFake.deleted(), "r1", "mensagem que causou panic não deve ser confirmada — SQS deve reentregar")
 }
 
 func TestConsumer_RespeitaCapDeConcorrencia(t *testing.T) {

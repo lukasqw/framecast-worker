@@ -1,6 +1,6 @@
 # framecast-worker
 
-Consumer SQS do pipeline Framecast. Recebe eventos de vídeo enfileirados pela `framecast-api`, executa FFmpeg para extração de frames (1 frame/segundo), faz streaming do ZIP para S3 e notifica o usuário via e-mail.
+Consumer SQS do pipeline Framecast. Recebe eventos de vídeo enfileirados pela `framecast-api`, executa FFmpeg para extração de frames (`FFMPEG_FPS`, padrão 1 frame/segundo), faz streaming do ZIP para S3 e notifica o usuário via e-mail.
 
 ---
 
@@ -28,7 +28,7 @@ SQS ReceiveMessage (long poll 20s, VisibilityTimeout=15min, batch até 10 mensag
   ├─ Download: S3.GetObject → workDir/input.mp4
   │   falha → markError + SendFailure + DeleteMessage
   │
-  ├─ FFmpeg: extrai 1 frame/segundo → workDir/frames/frame_%04d.png
+  ├─ FFmpeg: extrai FFMPEG_FPS frames/segundo (padrão 1) → workDir/frames/frame_%04d.png
   │   falha (codec/corrompido/timeout) → markError + SendFailure + DeleteMessage [não-retentável]
   │
   ├─ ZIP streaming: io.Pipe → zip.Writer (goroutine A) ↔ s3manager.Upload (inline)
@@ -110,6 +110,7 @@ framecast-worker/
 | `AWS_SESSION_TOKEN` | — | — | Token de sessão temporária (prod/CI) |
 | `WORKER_CONCURRENCY` | — | `3` | Slots paralelos por pod |
 | `FFMPEG_TIMEOUT_MINUTES` | — | `30` | Timeout do processo FFmpeg |
+| `FFMPEG_FPS` | — | `1` | Frames extraídos por segundo de vídeo (`-vf fps=N`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | `""` | Endpoint OTLP gRPC — vazio desabilita OTel |
 | `APP_ENV` | — | `""` | Ambiente (`dev`, `staging`, `production`) |
 | `APP_VERSION` | — | `""` | Versão propagada nos spans |

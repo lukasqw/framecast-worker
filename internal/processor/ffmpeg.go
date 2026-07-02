@@ -25,10 +25,10 @@ var runFFmpegRunner commandRunner = func(ctx context.Context, name string, args 
 	return stderr.String(), err
 }
 
-// runFFmpeg executa o FFmpeg para extrair 1 frame por segundo do inputPath,
+// runFFmpeg executa o FFmpeg para extrair fps frames por segundo do inputPath,
 // salvando os PNGs em framesDir com o padrão frame_%04d.png.
 // Retorna a contagem de frames gerados ou erro não-retentável.
-func runFFmpeg(ctx context.Context, inputPath, framesDir string, timeoutMinutes int) (int, error) {
+func runFFmpeg(ctx context.Context, inputPath, framesDir string, timeoutMinutes, fps int) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMinutes)*time.Minute)
 	defer cancel()
 
@@ -36,7 +36,7 @@ func runFFmpeg(ctx context.Context, inputPath, framesDir string, timeoutMinutes 
 
 	stderr, err := runFFmpegRunner(ctx, "ffmpeg",
 		"-i", inputPath,
-		"-vf", "fps=1",
+		"-vf", fmt.Sprintf("fps=%d", fps),
 		"-loglevel", "error",
 		outputPattern,
 	)

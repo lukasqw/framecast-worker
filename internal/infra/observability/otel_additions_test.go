@@ -52,6 +52,45 @@ func TestRecordSQSMessagesReceived_ComInstrumento_NaoPanica(t *testing.T) {
 	})
 }
 
+func TestRecordHeartbeatFuncs_SemInstrumento_NaoPanica(t *testing.T) {
+	origSQS := heartbeatSQSErrCounter
+	origDB := heartbeatDBErrCounter
+	origPanic := heartbeatPanicCounter
+	origAbandoned := processingAbandonedCounter
+	origConsumerPanic := consumerPanicCounter
+	heartbeatSQSErrCounter = nil
+	heartbeatDBErrCounter = nil
+	heartbeatPanicCounter = nil
+	processingAbandonedCounter = nil
+	consumerPanicCounter = nil
+	defer func() {
+		heartbeatSQSErrCounter = origSQS
+		heartbeatDBErrCounter = origDB
+		heartbeatPanicCounter = origPanic
+		processingAbandonedCounter = origAbandoned
+		consumerPanicCounter = origConsumerPanic
+	}()
+
+	ctx := context.Background()
+	assert.NotPanics(t, func() { RecordHeartbeatSQSError(ctx) })
+	assert.NotPanics(t, func() { RecordHeartbeatDBError(ctx) })
+	assert.NotPanics(t, func() { RecordHeartbeatPanic(ctx) })
+	assert.NotPanics(t, func() { RecordProcessingAbandoned(ctx) })
+	assert.NotPanics(t, func() { RecordConsumerPanic(ctx) })
+}
+
+func TestRecordHeartbeatFuncs_ComInstrumento_NaoPanica(t *testing.T) {
+	meter := noop.NewMeterProvider().Meter("test")
+	require.NoError(t, initMetrics(meter))
+
+	ctx := context.Background()
+	assert.NotPanics(t, func() { RecordHeartbeatSQSError(ctx) })
+	assert.NotPanics(t, func() { RecordHeartbeatDBError(ctx) })
+	assert.NotPanics(t, func() { RecordHeartbeatPanic(ctx) })
+	assert.NotPanics(t, func() { RecordProcessingAbandoned(ctx) })
+	assert.NotPanics(t, func() { RecordConsumerPanic(ctx) })
+}
+
 func TestInitOTel_EndpointFake_CobreCorpoDaFuncao(t *testing.T) {
 	// gRPC com NewClient é lazy: a conexão não é estabelecida durante InitOTel,
 	// então a função completa sem bloquear mesmo com porta fechada.

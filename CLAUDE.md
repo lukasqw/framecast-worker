@@ -26,7 +26,7 @@ internal/infra/
 ```
 Consumer.Run → semáforo → goroutine → processor.Process:
   acquireLease (SELECT FOR UPDATE) → heartbeat (1min) → download S3 →
-  FFmpeg (fps=1, PNGs) → zipAndUpload (io.Pipe streaming) →
+  FFmpeg (fps=FFMPEG_FPS, padrão 1, PNGs) → zipAndUpload (io.Pipe streaming) →
   finalizeSuccess (UPDATE DONE) → SendSuccess (best-effort) → DeleteMessage
 ```
 
