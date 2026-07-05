@@ -97,6 +97,7 @@ framecast-worker/
 | `SQS_QUEUE_URL` | ✅ | — | URL da fila principal de processamento |
 | `SES_FROM_EMAIL` | ✅ | — | Remetente SES (identidade verificada) |
 | `SQS_DLQ_URL` | — | `""` | URL da DLQ — habilita DLQHandler se preenchido |
+| `EMAIL_NOTIFICATIONS_ENABLED` | — | `true` | `false` desliga o envio de e-mail (usa `NoOpNotifier`) sem mudar o backend configurado |
 | `NOTIFIER_BACKEND` | — | `smtp` | `smtp` ou `ses` |
 | `SMTP_HOST` | — | — | Servidor SMTP (ex: `sandbox.smtp.mailtrap.io`) |
 | `SMTP_PORT` | — | — | Porta SMTP (ex: `2525`) |
@@ -193,6 +194,12 @@ Com `SES_RECIPIENT_OVERRIDE` configurado, todos os e-mails chegam no mesmo ender
 | FFmpeg conclui com sucesso | "Seu vídeo está pronto para download" |
 | FFmpeg falha (codec/timeout) | "Falha no processamento do seu vídeo" |
 | Mensagem vai para DLQ (3× tentativas) | "Falha no processamento do seu vídeo" |
+
+Layout HTML moderno (card escuro, com fallback texto-plano para clientes sem suporte a
+HTML) — templates em `internal/infra/email/template.go`. O e-mail de sucesso inclui um
+botão com a URL de download direto do ZIP (S3 presigned, TTL 7 dias, best-effort: se a
+geração da URL falhar, o e-mail sai sem o botão em vez de bloquear a notificação).
+`EMAIL_NOTIFICATIONS_ENABLED=false` desliga o envio inteiro (`NoOpNotifier`).
 
 ---
 
