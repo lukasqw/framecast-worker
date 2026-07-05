@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
 	"github.com/lukasqw/framecast-worker/internal/infra/email"
@@ -48,12 +49,30 @@ func (f *fakeS3Full) AbortMultipartUpload(context.Context, *s3.AbortMultipartUpl
 	return nil, nil
 }
 
+const fakePresignedURL = "https://framecast-videos-output.s3.amazonaws.com/output.zip?presigned=1"
+
+// fakePresigner satisfaz presignAPI — usado no lugar do *s3.PresignClient real
+// pra validar que a URL de download chega até o e-mail de sucesso sem depender
+// de credenciais AWS reais.
+type fakePresigner struct {
+	url string
+	err error
+}
+
+func (f *fakePresigner) PresignGetObject(_ context.Context, _ *s3.GetObjectInput, _ ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &v4.PresignedHTTPRequest{URL: f.url}, nil
+}
+
 type processorTestDeps struct {
-	mock sqlmock.Sqlmock
-	s3   *fakeS3Full
-	up   *fakeUploader
-	sqs  *fakeHeartbeatSQS
-	notif *email.MockNotifier
+	mock      sqlmock.Sqlmock
+	s3        *fakeS3Full
+	up        *fakeUploader
+	sqs       *fakeHeartbeatSQS
+	notif     *email.MockNotifier
+	presigner *fakePresigner
 }
 
 func newTestProcessor(t *testing.T) (*Processor, *processorTestDeps) {
@@ -63,11 +82,13 @@ func newTestProcessor(t *testing.T) (*Processor, *processorTestDeps) {
 	up := &fakeUploader{}
 	sqsFake := &fakeHeartbeatSQS{}
 	notif := &email.MockNotifier{}
+	presignerFake := &fakePresigner{url: fakePresignedURL}
 
 	p := &Processor{
 		db:                   db,
 		s3Client:             s3Fake,
 		uploader:             up,
+		presigner:            presignerFake,
 		sqsClient:            sqsFake,
 		queueURL:             "queue-url",
 		workerID:             "worker-1",
@@ -75,7 +96,7 @@ func newTestProcessor(t *testing.T) (*Processor, *processorTestDeps) {
 		ffmpegFPS:            1,
 		notifier:             notif,
 	}
-	return p, &processorTestDeps{mock: mock, s3: s3Fake, up: up, sqs: sqsFake, notif: notif}
+	return p, &processorTestDeps{mock: mock, s3: s3Fake, up: up, sqs: sqsFake, notif: notif, presigner: presignerFake}
 }
 
 func testMsg() *consumer.Message {
@@ -212,8 +233,27 @@ func TestProcess_SucessoCompleto(t *testing.T) {
 	err := p.Process(context.Background(), testMsg(), "receipt-1")
 	require.NoError(t, err)
 	require.Len(t, deps.notif.SuccessCalls, 1)
+	assert.Equal(t, fakePresignedURL, deps.notif.SuccessCalls[0].DownloadURL)
 	assert.Contains(t, deps.sqs.deletedReceiptsList(), "receipt-1")
 	require.NotNil(t, deps.up.lastInput)
+	require.NoError(t, deps.mock.ExpectationsWereMet())
+}
+
+func TestProcess_PresignFalha_NaoImpedeNotificacaoDeSucesso(t *testing.T) {
+	p, deps := newTestProcessor(t)
+	deps.presigner.err = errors.New("credenciais expiradas")
+	expectLeaseAcquired(deps.mock, "v1", "worker-1")
+	withFakeRunner(t, fakeFFmpegRunnerCriaFrames(3))
+	deps.mock.ExpectExec(`UPDATE videos SET status = 'DONE', s3_key_output = \$1, frame_count = \$2,\s+worker_id = NULL, updated_at = NOW\(\) WHERE id = \$3`).
+		WillReturnResult(sqlmockResult(1))
+	deps.mock.ExpectQuery(`SELECT email FROM users WHERE id = \$1`).WithArgs("u1").
+		WillReturnRows(sqlmock.NewRows([]string{"email"}).AddRow("user@example.com"))
+
+	err := p.Process(context.Background(), testMsg(), "receipt-1")
+	require.NoError(t, err)
+	require.Len(t, deps.notif.SuccessCalls, 1)
+	assert.Empty(t, deps.notif.SuccessCalls[0].DownloadURL)
+	assert.Contains(t, deps.sqs.deletedReceiptsList(), "receipt-1")
 	require.NoError(t, deps.mock.ExpectationsWereMet())
 }
 

@@ -3,6 +3,7 @@ package processor
 import (
 	"context"
 
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -26,4 +27,10 @@ type sqsAPI interface {
 // s3GetAPI é o subconjunto usado só pelo downloader.
 type s3GetAPI interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
+}
+
+// presignAPI é o subconjunto do *s3.PresignClient usado para gerar a URL de
+// download do ZIP incluída no e-mail de sucesso (best-effort — ver Processor.Process).
+type presignAPI interface {
+	PresignGetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error)
 }

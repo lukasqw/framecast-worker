@@ -73,6 +73,9 @@ Veja [`variables.env.example`](variables.env.example) para a lista completa.
 | `K8S_NAMESPACE_DEV` | `framecast-dev` |
 | `COVERAGE_GATE` | `85` |
 | `HEALTH_ENDPOINT` | `/health` |
+| `EMAIL_NOTIFICATIONS_ENABLED` | `true` — liga/desliga o envio de e-mail sem mudar o backend (`false` usa `NoOpNotifier`) |
+| `NOTIFIER_BACKEND` | `smtp` (padrão) ou `ses` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USERNAME` / `SMTP_FROM` | usados quando `NOTIFIER_BACKEND=smtp` (`SMTP_PASSWORD` é Secret) |
 
 ### Secrets obrigatórios
 

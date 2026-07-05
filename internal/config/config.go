@@ -22,6 +22,10 @@ type Config struct {
 	SQSQueueURL string
 	SQSDLQURL   string // opcional: se definida, ativa o consumer da DLQ (marca ERROR + e-mail)
 
+	// Liga/desliga o envio de e-mail sem mudar qual backend seria usado — permite
+	// desativar e reativar sem precisar lembrar/reconfigurar NotifierBackend.
+	EmailNotificationsEnabled bool
+
 	// Notifier backend: "smtp" (padrão) ou "ses" (requer SES configurado — não funciona no Academy).
 	NotifierBackend string
 
@@ -74,6 +78,9 @@ func Load() (*Config, error) {
 	}
 
 	var err error
+	if cfg.EmailNotificationsEnabled, err = parseBool(getEnvOrDefault("EMAIL_NOTIFICATIONS_ENABLED", "true")); err != nil {
+		return nil, fmt.Errorf("EMAIL_NOTIFICATIONS_ENABLED inválido: %w", err)
+	}
 	if cfg.WorkerConcurrency, err = parseInt(getEnvOrDefault("WORKER_CONCURRENCY", "1"), 1); err != nil {
 		return nil, fmt.Errorf("WORKER_CONCURRENCY inválido: %w", err)
 	}
@@ -123,6 +130,14 @@ func parseInt(s string, min int) (int, error) {
 		return 0, fmt.Errorf("deve ser um inteiro >= %d, recebido %q", min, s)
 	}
 	return n, nil
+}
+
+func parseBool(s string) (bool, error) {
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		return false, fmt.Errorf("deve ser true/false, recebido %q", s)
+	}
+	return b, nil
 }
 
 func getEnvOrDefault(key, defaultVal string) string {
