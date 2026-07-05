@@ -52,6 +52,10 @@ inputs:
     description: 'Frames per second extracted from the video (frame extraction rate for the ZIP)'
     required: false
     default: '1'
+  email_notifications_enabled:
+    description: 'Liga/desliga o envio de e-mail sem mudar o backend configurado'
+    required: false
+    default: 'true'
   notifier_backend:
     description: 'Notifier backend: smtp (default) or ses'
     required: false
@@ -139,6 +143,7 @@ runs:
           --from-literal=S3_BUCKET_RAW=${{ steps.infra.outputs.s3_bucket_raw }} \
           --from-literal=S3_BUCKET_OUTPUT=${{ steps.infra.outputs.s3_bucket_output }} \
           --from-literal=SQS_QUEUE_URL=${{ steps.infra.outputs.sqs_queue_url }} \
+          --from-literal=EMAIL_NOTIFICATIONS_ENABLED=${{ inputs.email_notifications_enabled }} \
           --from-literal=NOTIFIER_BACKEND=${{ inputs.notifier_backend }} \
           --from-literal=SMTP_HOST=${{ inputs.smtp_host }} \
           --from-literal=SMTP_PORT=${{ inputs.smtp_port }} \

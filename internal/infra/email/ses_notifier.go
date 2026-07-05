@@ -2,7 +2,6 @@ package email
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -28,15 +27,14 @@ func NewSESNotifier(sesClient sesAPI, fromEmail, recipientOverride string) *SESN
 	return &SESNotifier{ses: sesClient, fromEmail: fromEmail, recipientOverride: recipientOverride}
 }
 
-func (n *SESNotifier) SendSuccess(ctx context.Context, toEmail, videoID, filename string) {
-	subject := "Seu vídeo está pronto para download"
-	body := fmt.Sprintf(
-		"Olá!\n\nSeu vídeo %q foi processado com sucesso.\n"+
-			"Acesse a plataforma para baixar os frames extraídos.\n\n"+
-			"ID do vídeo: %s",
-		filename, videoID,
-	)
-	if err := n.send(ctx, toEmail, subject, body); err != nil {
+func (n *SESNotifier) SendSuccess(ctx context.Context, toEmail, videoID, filename, downloadURL string) {
+	subject, html, text, err := buildSuccessEmail(filename, videoID, downloadURL)
+	if err != nil {
+		slog.ErrorContext(ctx, "falha ao montar e-mail de sucesso (best-effort)",
+			slog.String("video_id", videoID), slog.String("erro", err.Error()))
+		return
+	}
+	if err := n.send(ctx, toEmail, subject, html, text); err != nil {
 		slog.ErrorContext(ctx, "falha ao enviar e-mail de sucesso via SES (best-effort)",
 			slog.String("video_id", videoID),
 			slog.String("erro", err.Error()),
@@ -45,14 +43,13 @@ func (n *SESNotifier) SendSuccess(ctx context.Context, toEmail, videoID, filenam
 }
 
 func (n *SESNotifier) SendFailure(ctx context.Context, toEmail, videoID, errMsg string) {
-	subject := "Falha no processamento do seu vídeo"
-	body := fmt.Sprintf(
-		"Olá!\n\nOcorreu um erro ao processar seu vídeo.\n\n"+
-			"ID do vídeo: %s\nMotivo: %s\n\n"+
-			"Entre em contato se precisar de ajuda.",
-		videoID, errMsg,
-	)
-	if err := n.send(ctx, toEmail, subject, body); err != nil {
+	subject, html, text, err := buildFailureEmail(videoID, errMsg)
+	if err != nil {
+		slog.ErrorContext(ctx, "falha ao montar e-mail de falha (best-effort)",
+			slog.String("video_id", videoID), slog.String("erro", err.Error()))
+		return
+	}
+	if err := n.send(ctx, toEmail, subject, html, text); err != nil {
 		slog.ErrorContext(ctx, "falha ao enviar e-mail de erro via SES (best-effort)",
 			slog.String("video_id", videoID),
 			slog.String("erro", err.Error()),
@@ -60,7 +57,7 @@ func (n *SESNotifier) SendFailure(ctx context.Context, toEmail, videoID, errMsg 
 	}
 }
 
-func (n *SESNotifier) send(ctx context.Context, toEmail, subject, body string) error {
+func (n *SESNotifier) send(ctx context.Context, toEmail, subject, html, text string) error {
 	recipient := toEmail
 	if n.recipientOverride != "" {
 		recipient = n.recipientOverride
@@ -74,7 +71,8 @@ func (n *SESNotifier) send(ctx context.Context, toEmail, subject, body string) e
 			Simple: &sestypes.Message{
 				Subject: &sestypes.Content{Data: aws.String(subject)},
 				Body: &sestypes.Body{
-					Text: &sestypes.Content{Data: aws.String(body)},
+					Html: &sestypes.Content{Data: aws.String(html)},
+					Text: &sestypes.Content{Data: aws.String(text)},
 				},
 			},
 		},

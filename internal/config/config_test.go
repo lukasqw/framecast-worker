@@ -29,6 +29,7 @@ func setRequiredEnv(t *testing.T) {
 	t.Setenv("WORKER_CONCURRENCY", "")
 	t.Setenv("FFMPEG_TIMEOUT_MINUTES", "")
 	t.Setenv("FFMPEG_FPS", "")
+	t.Setenv("EMAIL_NOTIFICATIONS_ENABLED", "")
 }
 
 func TestLoad_Sucesso(t *testing.T) {
@@ -55,6 +56,7 @@ func TestLoad_DefaultsAplicados(t *testing.T) {
 	assert.Equal(t, 1, cfg.WorkerConcurrency)
 	assert.Equal(t, 30, cfg.FFmpegTimeoutMinutes)
 	assert.Equal(t, 1, cfg.FFmpegFPS)
+	assert.True(t, cfg.EmailNotificationsEnabled)
 }
 
 func TestLoad_ValoresCustomizados(t *testing.T) {
@@ -64,6 +66,7 @@ func TestLoad_ValoresCustomizados(t *testing.T) {
 	t.Setenv("WORKER_CONCURRENCY", "5")
 	t.Setenv("FFMPEG_TIMEOUT_MINUTES", "10")
 	t.Setenv("FFMPEG_FPS", "2")
+	t.Setenv("EMAIL_NOTIFICATIONS_ENABLED", "false")
 
 	cfg, err := Load()
 	require.NoError(t, err)
@@ -72,6 +75,7 @@ func TestLoad_ValoresCustomizados(t *testing.T) {
 	assert.Equal(t, 5, cfg.WorkerConcurrency)
 	assert.Equal(t, 10, cfg.FFmpegTimeoutMinutes)
 	assert.Equal(t, 2, cfg.FFmpegFPS)
+	assert.False(t, cfg.EmailNotificationsEnabled)
 }
 
 func TestLoad_FaltandoObrigatorias(t *testing.T) {
@@ -125,4 +129,13 @@ func TestLoad_FFmpegFPSInvalido(t *testing.T) {
 	_, err := Load()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "FFMPEG_FPS")
+}
+
+func TestLoad_EmailNotificationsEnabledInvalido(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("EMAIL_NOTIFICATIONS_ENABLED", "talvez")
+
+	_, err := Load()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "EMAIL_NOTIFICATIONS_ENABLED")
 }

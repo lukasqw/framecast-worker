@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
 	"github.com/lukasqw/framecast-worker/internal/infra/email"
@@ -20,11 +21,17 @@ import (
 	"gorm.io/gorm"
 )
 
+// downloadURLTTL casa com o lifecycle de expiração do bucket de output (7 dias,
+// ver framecast-infra) — o link do e-mail fica válido por tanto tempo quanto o
+// arquivo ainda existir no S3.
+const downloadURLTTL = 7 * 24 * time.Hour
+
 // Processor implementa consumer.Handler.
 type Processor struct {
 	db                   *gorm.DB
 	s3Client             s3API
 	uploader             uploader
+	presigner            presignAPI
 	sqsClient            sqsAPI
 	queueURL             string
 	workerID             string
@@ -36,6 +43,7 @@ type Processor struct {
 func New(
 	db *gorm.DB,
 	s3Client s3API,
+	presigner presignAPI,
 	sqsClient sqsAPI,
 	notif email.Notifier,
 	queueURL string,
@@ -47,6 +55,7 @@ func New(
 		db:                   db,
 		s3Client:             s3Client,
 		uploader:             manager.NewUploader(s3Client), //nolint:staticcheck // transfermanager (substituto) ainda é experimental no aws-sdk-go-v2
+		presigner:            presigner,
 		sqsClient:            sqsClient,
 		queueURL:             queueURL,
 		workerID:             hostname,
@@ -174,7 +183,8 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	// ── Notificação de sucesso (best-effort) ──────────────────────────────────
 	if userEmail, err := p.getUserEmail(ctx, row.UserID); err == nil && userEmail != "" {
-		p.notifier.SendSuccess(ctx, userEmail, msg.VideoID, row.OriginalName)
+		downloadURL := p.presignOutputURL(ctx, msg.OutputBucket, outputKey)
+		p.notifier.SendSuccess(ctx, userEmail, msg.VideoID, row.OriginalName, downloadURL)
 	}
 
 	observability.RecordVideoProcessed(ctx, "done")
@@ -191,6 +201,22 @@ func (p *Processor) markDone(ctx context.Context, videoID, outputKey string, fra
 		outputKey, frameCount, videoID,
 	)
 	return res.Error
+}
+
+// presignOutputURL gera a URL de download do ZIP para o e-mail de sucesso.
+// Best-effort: falha aqui não deve impedir a notificação (o app segue oferecendo
+// o download via GetVideo), só sai sem o link direto.
+func (p *Processor) presignOutputURL(ctx context.Context, bucket, key string) string {
+	req, err := p.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(downloadURLTTL))
+	if err != nil {
+		observability.LoggerFromContext(ctx).WarnContext(ctx, "falha ao gerar url de download para o e-mail (best-effort)",
+			slog.String("erro", err.Error()))
+		return ""
+	}
+	return req.URL
 }
 
 // markError atualiza o status para ERROR. Best-effort — falha apenas logada.

@@ -28,11 +28,37 @@ func TestSESNotifier_SendSuccess_EnviaParaDestinatario(t *testing.T) {
 	ses := &fakeSES{}
 	n := NewSESNotifier(ses, "noreply@framecast.local", "")
 
-	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
+	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4", "")
 
 	require.NotNil(t, ses.lastInput)
 	assert.Equal(t, "noreply@framecast.local", aws.ToString(ses.lastInput.FromEmailAddress))
 	assert.Equal(t, []string{"user@example.com"}, ses.lastInput.Destination.ToAddresses)
+}
+
+func TestSESNotifier_SendSuccess_IncluiURLDeDownloadNoCorpo(t *testing.T) {
+	ses := &fakeSES{}
+	n := NewSESNotifier(ses, "noreply@framecast.local", "")
+
+	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4", "https://s3.example.com/output.zip?presigned=1")
+
+	require.NotNil(t, ses.lastInput)
+	body := ses.lastInput.Content.Simple.Body
+	require.NotNil(t, body.Html)
+	require.NotNil(t, body.Text)
+	assert.Contains(t, aws.ToString(body.Html.Data), "https://s3.example.com/output.zip?presigned=1")
+	assert.Contains(t, aws.ToString(body.Text.Data), "https://s3.example.com/output.zip?presigned=1")
+}
+
+func TestSESNotifier_SendSuccess_SemURL_NaoMostraBotao(t *testing.T) {
+	ses := &fakeSES{}
+	n := NewSESNotifier(ses, "noreply@framecast.local", "")
+
+	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4", "")
+
+	require.NotNil(t, ses.lastInput)
+	body := ses.lastInput.Content.Simple.Body
+	assert.NotContains(t, aws.ToString(body.Html.Data), "Baixar frames")
+	assert.Contains(t, aws.ToString(body.Html.Data), "Acesse a plataforma")
 }
 
 func TestSESNotifier_SendFailure_EnviaParaDestinatario(t *testing.T) {
@@ -49,7 +75,7 @@ func TestSESNotifier_RecipientOverride_RedirecionaEmail(t *testing.T) {
 	ses := &fakeSES{}
 	n := NewSESNotifier(ses, "noreply@framecast.local", "dev-catchall@example.com")
 
-	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
+	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4", "")
 
 	require.NotNil(t, ses.lastInput)
 	assert.Equal(t, []string{"dev-catchall@example.com"}, ses.lastInput.Destination.ToAddresses)
@@ -60,6 +86,6 @@ func TestSESNotifier_ErroDoSES_NaoPropaga(t *testing.T) {
 	n := NewSESNotifier(ses, "noreply@framecast.local", "")
 
 	// best-effort: não deve panicar
-	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
+	n.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4", "")
 	n.SendFailure(context.Background(), "user@example.com", "v1", "erro qualquer")
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/joho/godotenv"
 	appconfig "github.com/lukasqw/framecast-worker/internal/config"
 	"github.com/lukasqw/framecast-worker/internal/consumer"
@@ -57,10 +58,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Seleciona backend de notificação via NOTIFIER_BACKEND (smtp | ses)
+	// Seleciona backend de notificação via NOTIFIER_BACKEND (smtp | ses).
+	// EMAIL_NOTIFICATIONS_ENABLED=false desliga o envio sem mexer em qual backend
+	// está configurado — reativar depois não exige reconfigurar NOTIFIER_BACKEND.
 	var notif email.Notifier
-	switch cfg.NotifierBackend {
-	case "ses":
+	switch {
+	case !cfg.EmailNotificationsEnabled:
+		notif = email.NoOpNotifier{}
+		slog.Info("notifier: desativado (EMAIL_NOTIFICATIONS_ENABLED=false)")
+	case cfg.NotifierBackend == "ses":
 		notif = email.NewSESNotifier(aws.SES, cfg.SESFromEmail, cfg.SESRecipientOverride)
 		slog.Info("notifier: SES", slog.String("from", cfg.SESFromEmail))
 	default: // smtp
@@ -73,7 +79,8 @@ func main() {
 		slog.Int("concorrência", cfg.WorkerConcurrency),
 	)
 
-	proc := processor.New(db, aws.S3, aws.SQS, notif, cfg.SQSQueueURL, cfg.FFmpegTimeoutMinutes, cfg.FFmpegFPS)
+	presigner := s3.NewPresignClient(aws.S3)
+	proc := processor.New(db, aws.S3, presigner, aws.SQS, notif, cfg.SQSQueueURL, cfg.FFmpegTimeoutMinutes, cfg.FFmpegFPS)
 	c := consumer.New(aws.SQS, cfg.SQSQueueURL, cfg.WorkerConcurrency, proc)
 
 	// Consumer da DLQ (opcional): marca o vídeo como ERROR e notifica o usuário.
