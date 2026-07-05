@@ -10,13 +10,14 @@ type MockNotifier struct {
 
 // NotifyCall representa uma chamada capturada pelo MockNotifier.
 type NotifyCall struct {
-	ToEmail string
-	VideoID string
-	Detail  string // filename (sucesso) ou errMsg (falha)
+	ToEmail     string
+	VideoID     string
+	Detail      string // filename (sucesso) ou errMsg (falha)
+	DownloadURL string // só preenchido em SendSuccess
 }
 
-func (m *MockNotifier) SendSuccess(_ context.Context, toEmail, videoID, filename string) {
-	m.SuccessCalls = append(m.SuccessCalls, NotifyCall{ToEmail: toEmail, VideoID: videoID, Detail: filename})
+func (m *MockNotifier) SendSuccess(_ context.Context, toEmail, videoID, filename, downloadURL string) {
+	m.SuccessCalls = append(m.SuccessCalls, NotifyCall{ToEmail: toEmail, VideoID: videoID, Detail: filename, DownloadURL: downloadURL})
 }
 
 func (m *MockNotifier) SendFailure(_ context.Context, toEmail, videoID, errMsg string) {

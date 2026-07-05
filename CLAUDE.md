@@ -42,9 +42,13 @@ DLQ consumer (ativado por `SQS_DLQ_URL`) → `markError + notifica + DeleteMessa
 
 ## Notificação de e-mail
 
+`EMAIL_NOTIFICATIONS_ENABLED` (padrão `true`) liga/desliga o envio sem mexer em qual
+backend está configurado — desligar e religar depois não exige reconfigurar
+`NOTIFIER_BACKEND`. Quando `false`, usa `email.NoOpNotifier` (descarta silenciosamente).  
 Backend selecionado por `NOTIFIER_BACKEND`: `ses` (SESv2) ou `smtp` (padrão).  
 SMTP com credenciais vazias → imprime no stdout (modo dev, sem conexão real).  
-`SES_RECIPIENT_OVERRIDE` redireciona todos os e-mails para um endereço fixo (dev/sandbox SES Academy).
+`SES_RECIPIENT_OVERRIDE` redireciona todos os e-mails para um endereço fixo (dev/sandbox SES Academy).  
+E-mail de sucesso inclui a URL de download do ZIP (S3 presigned, TTL 7 dias — best-effort, gerada em `internal/processor/processor.go`).
 
 ## Convenções de código
 

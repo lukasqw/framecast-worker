@@ -11,12 +11,13 @@ import (
 
 func TestMockNotifier_CapturaSuccessCalls(t *testing.T) {
 	m := &email.MockNotifier{}
-	m.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4")
+	m.SendSuccess(context.Background(), "user@example.com", "v1", "video.mp4", "https://s3/download.zip")
 
 	require.Len(t, m.SuccessCalls, 1)
 	assert.Equal(t, "user@example.com", m.SuccessCalls[0].ToEmail)
 	assert.Equal(t, "v1", m.SuccessCalls[0].VideoID)
 	assert.Equal(t, "video.mp4", m.SuccessCalls[0].Detail)
+	assert.Equal(t, "https://s3/download.zip", m.SuccessCalls[0].DownloadURL)
 }
 
 func TestMockNotifier_CapturaFailureCalls(t *testing.T) {
@@ -30,7 +31,7 @@ func TestMockNotifier_CapturaFailureCalls(t *testing.T) {
 
 func TestMockNotifier_Reset(t *testing.T) {
 	m := &email.MockNotifier{}
-	m.SendSuccess(context.Background(), "a@b.com", "v1", "f.mp4")
+	m.SendSuccess(context.Background(), "a@b.com", "v1", "f.mp4", "")
 	m.Reset()
 	assert.Empty(t, m.SuccessCalls)
 	assert.Empty(t, m.FailureCalls)
