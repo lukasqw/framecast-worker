@@ -29,6 +29,7 @@ type Processor struct {
 	queueURL             string
 	workerID             string
 	ffmpegTimeoutMinutes int
+	ffmpegFPS            int
 	notifier             email.Notifier
 }
 
@@ -39,6 +40,7 @@ func New(
 	notif email.Notifier,
 	queueURL string,
 	ffmpegTimeoutMinutes int,
+	ffmpegFPS int,
 ) *Processor {
 	hostname, _ := os.Hostname()
 	return &Processor{
@@ -49,6 +51,7 @@ func New(
 		queueURL:             queueURL,
 		workerID:             hostname,
 		ffmpegTimeoutMinutes: ffmpegTimeoutMinutes,
+		ffmpegFPS:            ffmpegFPS,
 		notifier:             notif,
 	}
 }
@@ -85,7 +88,7 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	log.InfoContext(ctx, "lease adquirido", slog.Int("attempt", row.Attempt))
 
-	stopHeartbeat := startHeartbeat(ctx, p.sqsClient, p.queueURL, receiptHandle, p.db, msg.VideoID, heartbeatInterval)
+	stopHeartbeat, heartbeatErrCh := startHeartbeat(ctx, p.sqsClient, p.queueURL, receiptHandle, p.db, msg.VideoID, heartbeatInterval)
 	defer stopHeartbeat()
 
 	// ── Diretório temporário — limpo sempre ao final ──────────────────────────
@@ -102,7 +105,6 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 		attribute.String("aws.s3.bucket", msg.Bucket),
 		attribute.String("aws.s3.key", msg.S3Key),
 	)
-	log.InfoContext(ctx, "baixando vídeo do S3", slog.String("bucket", msg.Bucket), slog.String("key", msg.S3Key))
 	dlErr := downloadVideo(ctx, p.s3Client, msg.Bucket, msg.S3Key, inputPath)
 	if dlErr != nil {
 		dlSpan.RecordError(dlErr)
@@ -112,6 +114,9 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 	if dlErr != nil {
 		return fmt.Errorf("falha ao baixar vídeo: %w", dlErr) // retentável
 	}
+	if err := checkHeartbeat(ctx, msg.VideoID, heartbeatErrCh); err != nil {
+		return err
+	}
 
 	// ── FFmpeg ────────────────────────────────────────────────────────────────
 	framesDir := filepath.Join(tempDir, "frames")
@@ -119,10 +124,9 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 		return fmt.Errorf("falha ao criar diretório de frames: %w", err)
 	}
 
-	log.InfoContext(ctx, "executando FFmpeg")
 	ctx, ffSpan := observability.SpanWorker(ctx, "ffmpeg.execute")
 	ffmpegStart := time.Now()
-	frameCount, err := runFFmpeg(ctx, inputPath, framesDir, p.ffmpegTimeoutMinutes)
+	frameCount, err := runFFmpeg(ctx, inputPath, framesDir, p.ffmpegTimeoutMinutes, p.ffmpegFPS)
 	observability.RecordFFmpegDuration(ctx, time.Since(ffmpegStart).Seconds())
 
 	if err != nil {
@@ -142,11 +146,12 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	ffSpan.SetAttributes(attribute.Int("ffmpeg.frame_count", frameCount))
 	ffSpan.End()
-	log.InfoContext(ctx, "frames extraídos", slog.Int("frames", frameCount))
 	observability.RecordFrameCount(ctx, int64(frameCount))
+	if err := checkHeartbeat(ctx, msg.VideoID, heartbeatErrCh); err != nil {
+		return err
+	}
 
 	// ── ZIP streaming + upload S3 ─────────────────────────────────────────────
-	log.InfoContext(ctx, "fazendo upload do ZIP para S3", slog.String("bucket", msg.OutputBucket))
 	ctx, zipSpan := observability.SpanWorker(ctx, "zip.upload")
 	zipSpan.SetAttributes(attribute.String("aws.s3.bucket", msg.OutputBucket))
 	outputKey, err := zipAndUpload(ctx, p.uploader, framesDir, msg.OutputBucket, msg.VideoID)
@@ -158,7 +163,9 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 	}
 	zipSpan.SetAttributes(attribute.String("aws.s3.key", outputKey))
 	zipSpan.End()
-	log.InfoContext(ctx, "ZIP enviado", slog.String("key", outputKey))
+	if err := checkHeartbeat(ctx, msg.VideoID, heartbeatErrCh); err != nil {
+		return err
+	}
 
 	// ── Finalização em transação ──────────────────────────────────────────────
 	if err := p.markDone(ctx, msg.VideoID, outputKey, frameCount); err != nil {
@@ -172,7 +179,6 @@ func (p *Processor) Process(ctx context.Context, msg *consumer.Message, receiptH
 
 	observability.RecordVideoProcessed(ctx, "done")
 	observability.RecordVideoProcessingDuration(ctx, time.Since(start).Seconds(), "done")
-	log.InfoContext(ctx, "processamento concluído", slog.String("output_key", outputKey))
 
 	// ── ACK ───────────────────────────────────────────────────────────────────
 	return p.deleteMessage(ctx, receiptHandle)
@@ -218,4 +224,20 @@ func (p *Processor) deleteMessage(ctx context.Context, receiptHandle string) err
 		return fmt.Errorf("falha ao deletar mensagem SQS: %w", err)
 	}
 	return nil
+}
+
+// checkHeartbeat verifica de forma não-bloqueante se o heartbeat reportou falha.
+// Retorna erro (sem DeleteMessage) para que o SQS reentregue a mensagem após a
+// visibility expirar — o lease TTL garante que outro pod poderá reassumir.
+func checkHeartbeat(ctx context.Context, videoID string, ch <-chan error) error {
+	select {
+	case err := <-ch:
+		slog.ErrorContext(ctx, "heartbeat falhou — abandonando processamento para SQS reentregar",
+			slog.String("video_id", videoID),
+			slog.String("erro", err.Error()),
+		)
+		return fmt.Errorf("heartbeat falhou: %w", err)
+	default:
+		return nil
+	}
 }

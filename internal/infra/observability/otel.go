@@ -153,6 +153,12 @@ var (
 	videoFrameCountHisto   metric.Int64Histogram
 	ffmpegDurationHisto    metric.Float64Histogram
 	sqsMessagesCounter     metric.Int64Counter
+
+	heartbeatSQSErrCounter      metric.Int64Counter
+	heartbeatDBErrCounter       metric.Int64Counter
+	heartbeatPanicCounter       metric.Int64Counter
+	processingAbandonedCounter  metric.Int64Counter
+	consumerPanicCounter        metric.Int64Counter
 )
 
 func initMetrics(m metric.Meter) error {
@@ -199,6 +205,36 @@ func initMetrics(m metric.Meter) error {
 	); err != nil {
 		return err
 	}
+	if heartbeatSQSErrCounter, err = m.Int64Counter(
+		"framecast.worker.heartbeat.sqs.error",
+		metric.WithDescription("Falhas de renovação de visibility no SQS"),
+	); err != nil {
+		return err
+	}
+	if heartbeatDBErrCounter, err = m.Int64Counter(
+		"framecast.worker.heartbeat.db.error",
+		metric.WithDescription("Falhas de renovação de lease no banco"),
+	); err != nil {
+		return err
+	}
+	if heartbeatPanicCounter, err = m.Int64Counter(
+		"framecast.worker.heartbeat.panic",
+		metric.WithDescription("Panics capturados na goroutine de heartbeat"),
+	); err != nil {
+		return err
+	}
+	if processingAbandonedCounter, err = m.Int64Counter(
+		"framecast.worker.processing.abandoned",
+		metric.WithDescription("Processamentos abandonados por falhas consecutivas de heartbeat SQS"),
+	); err != nil {
+		return err
+	}
+	if consumerPanicCounter, err = m.Int64Counter(
+		"framecast.worker.consumer.panic",
+		metric.WithDescription("Panics capturados na goroutine de processamento de mensagens SQS"),
+	); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -230,5 +266,35 @@ func RecordFFmpegDuration(ctx context.Context, seconds float64) {
 func RecordSQSMessagesReceived(ctx context.Context, count int64) {
 	if sqsMessagesCounter != nil {
 		sqsMessagesCounter.Add(ctx, count)
+	}
+}
+
+func RecordHeartbeatSQSError(ctx context.Context) {
+	if heartbeatSQSErrCounter != nil {
+		heartbeatSQSErrCounter.Add(ctx, 1)
+	}
+}
+
+func RecordHeartbeatDBError(ctx context.Context) {
+	if heartbeatDBErrCounter != nil {
+		heartbeatDBErrCounter.Add(ctx, 1)
+	}
+}
+
+func RecordHeartbeatPanic(ctx context.Context) {
+	if heartbeatPanicCounter != nil {
+		heartbeatPanicCounter.Add(ctx, 1)
+	}
+}
+
+func RecordProcessingAbandoned(ctx context.Context) {
+	if processingAbandonedCounter != nil {
+		processingAbandonedCounter.Add(ctx, 1)
+	}
+}
+
+func RecordConsumerPanic(ctx context.Context) {
+	if consumerPanicCounter != nil {
+		consumerPanicCounter.Add(ctx, 1)
 	}
 }

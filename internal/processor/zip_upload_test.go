@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -22,9 +23,11 @@ type fakeUploader struct {
 
 func (f *fakeUploader) Upload(_ context.Context, input *s3.PutObjectInput, _ ...func(*manager.Uploader)) (*manager.UploadOutput, error) { //nolint:staticcheck // assinatura precisa casar com a interface uploader (zip_upload.go)
 	f.lastInput = input
-	// Sempre drena o pipe — como o s3manager.Uploader real, que lê o body por
-	// completo mesmo quando o upload acaba falhando. Sem isso, o produtor
-	// (writeFramesToZip) bloquearia para sempre escrevendo num pipe sem leitor.
+	// Drena o pipe por completo — reproduz o caminho single-part (ZIP <= 5MiB, o
+	// PartSize padrão) do s3manager.Uploader real, que lê o body inteiro antes de
+	// decidir upload single vs multipart e só então chama PutObject. No caminho
+	// multipart (ZIP maior) o uploader real NÃO garante essa drenagem quando falha
+	// (ver fakeUploaderNoDrain / TestZipAndUpload_ErroSemDrenarPipe_NaoTrava).
 	_, copyErr := io.Copy(io.Discard, input.Body)
 	if f.err != nil {
 		return nil, f.err
@@ -33,6 +36,16 @@ func (f *fakeUploader) Upload(_ context.Context, input *s3.PutObjectInput, _ ...
 		return nil, copyErr
 	}
 	return &manager.UploadOutput{}, nil
+}
+
+// fakeUploaderNoDrain reproduz o caminho multipart do s3manager.Uploader real
+// quando CreateMultipartUpload (ou uma parte) falha antes de esgotar o body —
+// o body não é lido. Ver aws-sdk-go-v2/feature/s3/manager upload.go:663-668 e
+// 683-703 (o loop de leitura para assim que u.geterr() != nil).
+type fakeUploaderNoDrain struct{ err error }
+
+func (f *fakeUploaderNoDrain) Upload(_ context.Context, _ *s3.PutObjectInput, _ ...func(*manager.Uploader)) (*manager.UploadOutput, error) { //nolint:staticcheck // assinatura precisa casar com a interface uploader (zip_upload.go)
+	return nil, f.err
 }
 
 func writeFakeFrames(t *testing.T, dir string, names ...string) {
@@ -108,6 +121,35 @@ func TestZipAndUpload_ErroDeUpload(t *testing.T) {
 	_, err := zipAndUpload(context.Background(), up, dir, "output-bucket", "video-123")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "upload")
+}
+
+// TestZipAndUpload_ErroSemDrenarPipe_NaoTrava reproduz o caso em que o upload S3
+// falha (ex.: CreateMultipartUpload sem permissão) sem nunca ler o body — sem o
+// pr.CloseWithError em zipAndUpload, a goroutine produtora travaria para sempre
+// em pw.Write() e este teste travaria até o timeout do `go test`.
+func TestZipAndUpload_ErroSemDrenarPipe_NaoTrava(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeFrames(t, dir, "frame_0001.png")
+
+	up := &fakeUploaderNoDrain{err: errors.New("create multipart upload falhou")}
+
+	type result struct {
+		key string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		key, err := zipAndUpload(context.Background(), up, dir, "output-bucket", "video-123")
+		done <- result{key: key, err: err}
+	}()
+
+	select {
+	case res := <-done:
+		require.Error(t, res.err)
+		assert.Contains(t, res.err.Error(), "upload")
+	case <-time.After(2 * time.Second):
+		t.Fatal("zipAndUpload travou quando o uploader falhou sem drenar o pipe")
+	}
 }
 
 func TestZipAndUpload_ErroAoListarFrames(t *testing.T) {

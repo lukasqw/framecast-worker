@@ -26,6 +26,6 @@ func TestParse_JSONInvalido(t *testing.T) {
 
 func TestParse_BodyNil(t *testing.T) {
 	msg, err := parse(sqstypes.Message{})
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.Nil(t, msg)
 }

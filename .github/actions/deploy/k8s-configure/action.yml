@@ -48,6 +48,10 @@ inputs:
     description: 'FFmpeg execution timeout in minutes'
     required: false
     default: '10'
+  ffmpeg_fps:
+    description: 'Frames per second extracted from the video (frame extraction rate for the ZIP)'
+    required: false
+    default: '1'
   notifier_backend:
     description: 'Notifier backend: smtp (default) or ses'
     required: false
@@ -142,6 +146,7 @@ runs:
           --from-literal=SMTP_FROM=${{ inputs.smtp_from }} \
           --from-literal=WORKER_CONCURRENCY=${{ inputs.worker_concurrency }} \
           --from-literal=FFMPEG_TIMEOUT_MINUTES=${{ inputs.ffmpeg_timeout_minutes }} \
+          --from-literal=FFMPEG_FPS=${{ inputs.ffmpeg_fps }} \
           --from-literal=APP_ENV=production \
           --from-literal=APP_VERSION=${{ inputs.image }} \
           --from-literal=DD_SERVICE=framecast-worker \

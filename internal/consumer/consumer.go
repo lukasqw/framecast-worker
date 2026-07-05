@@ -3,6 +3,8 @@ package consumer
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -122,6 +124,23 @@ func (c *Consumer) Run(ctx context.Context) {
 					attribute.String("framecast.video_id", parsed.VideoID),
 				)
 				defer span.End()
+				// Sem isto, um panic no handler (bug em Process, nil deref etc.) derruba
+				// o processo inteiro, abortando as demais mensagens em processamento
+				// concorrente no mesmo pod. Não deleta a mensagem — deixa o SQS
+				// reentregar após a visibility expirar, como em qualquer falha retentável.
+				defer func() {
+					if r := recover(); r != nil {
+						observability.RecordConsumerPanic(msgCtx)
+						panicErr := fmt.Errorf("panic: %v", r)
+						span.RecordError(panicErr)
+						span.SetStatus(codes.Error, panicErr.Error())
+						observability.LoggerFromContext(msgCtx).Error(
+							"panic ao processar mensagem SQS — mensagem será reentregue pelo SQS",
+							slog.Any("recover", r),
+							slog.String("video_id", parsed.VideoID),
+						)
+					}
+				}()
 
 				observability.RecordSQSMessagesReceived(msgCtx, 1)
 
@@ -168,7 +187,7 @@ func (c *Consumer) delete(ctx context.Context, receiptHandle *string) {
 
 func parse(m sqstypes.Message) (*Message, error) {
 	if m.Body == nil {
-		return nil, nil
+		return nil, errors.New("mensagem SQS sem corpo (Body nil)")
 	}
 	var msg Message
 	if err := json.Unmarshal([]byte(*m.Body), &msg); err != nil {

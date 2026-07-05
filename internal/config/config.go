@@ -38,6 +38,7 @@ type Config struct {
 
 	WorkerConcurrency    int
 	FFmpegTimeoutMinutes int
+	FFmpegFPS            int
 
 	OTelEndpoint string
 
@@ -78,6 +79,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.FFmpegTimeoutMinutes, err = parseInt(getEnvOrDefault("FFMPEG_TIMEOUT_MINUTES", "30"), 1); err != nil {
 		return nil, fmt.Errorf("FFMPEG_TIMEOUT_MINUTES inválido: %w", err)
+	}
+	if cfg.FFmpegFPS, err = parseInt(getEnvOrDefault("FFMPEG_FPS", "1"), 1); err != nil {
+		return nil, fmt.Errorf("FFMPEG_FPS inválido: %w", err)
 	}
 
 	if err := cfg.validate(); err != nil {

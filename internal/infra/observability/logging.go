@@ -30,8 +30,6 @@ func NewLogger() *slog.Logger {
 		},
 	})).With(
 		slog.String("service", envOrDefault("DD_SERVICE", "framecast-worker")),
-		slog.String("env", os.Getenv("APP_ENV")),
-		slog.String("version", os.Getenv("APP_VERSION")),
 	)
 	slog.SetDefault(logger)
 	return logger
@@ -52,8 +50,6 @@ func LoggerFromContext(ctx context.Context) *slog.Logger {
 	ddSpanID := binary.BigEndian.Uint64(spanIDBytes[:])
 
 	return slog.Default().With(
-		slog.String("trace_id", sc.TraceID().String()),
-		slog.String("span_id", sc.SpanID().String()),
 		slog.String("dd.trace_id", fmt.Sprintf("%d", ddTraceID)),
 		slog.String("dd.span_id", fmt.Sprintf("%d", ddSpanID)),
 	)
