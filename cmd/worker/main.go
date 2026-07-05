@@ -73,7 +73,7 @@ func main() {
 		slog.Int("concorrência", cfg.WorkerConcurrency),
 	)
 
-	proc := processor.New(db, aws.S3, aws.SQS, notif, cfg.SQSQueueURL, cfg.FFmpegTimeoutMinutes)
+	proc := processor.New(db, aws.S3, aws.SQS, notif, cfg.SQSQueueURL, cfg.FFmpegTimeoutMinutes, cfg.FFmpegFPS)
 	c := consumer.New(aws.SQS, cfg.SQSQueueURL, cfg.WorkerConcurrency, proc)
 
 	// Consumer da DLQ (opcional): marca o vídeo como ERROR e notifica o usuário.

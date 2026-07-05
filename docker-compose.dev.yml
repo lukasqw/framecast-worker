@@ -46,6 +46,7 @@ services:
       SES_RECIPIENT_OVERRIDE: dev@framecast.local
       WORKER_CONCURRENCY: "1"
       FFMPEG_TIMEOUT_MINUTES: "30"
+      FFMPEG_FPS: "1"
       APP_ENV: dev
       APP_VERSION: local
       DD_SERVICE: framecast-worker

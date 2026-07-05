@@ -26,8 +26,6 @@ func (p *otelPlugin) Initialize(db *gorm.DB) error {
 	errs = append(errs, db.Callback().Update().After("gorm:update").Register("otel:after_update", p.after))
 	errs = append(errs, db.Callback().Delete().Before("gorm:delete").Register("otel:before_delete", p.before("delete")))
 	errs = append(errs, db.Callback().Delete().After("gorm:delete").Register("otel:after_delete", p.after))
-	errs = append(errs, db.Callback().Row().Before("gorm:row").Register("otel:before_row", p.before("row")))
-	errs = append(errs, db.Callback().Row().After("gorm:row").Register("otel:after_row", p.after))
 	errs = append(errs, db.Callback().Raw().Before("gorm:raw").Register("otel:before_raw", p.before("raw")))
 	errs = append(errs, db.Callback().Raw().After("gorm:raw").Register("otel:after_raw", p.after))
 	return errors.Join(errs...)

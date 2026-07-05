@@ -49,6 +49,12 @@ func zipAndUpload(ctx context.Context, up uploader, framesDir, bucket, videoID s
 		Body:        pr,
 		ContentType: aws.String("application/zip"),
 	})
+	if uploadErr != nil {
+		// O manager.Uploader nem sempre drena o body ao falhar (ex.: CreateMultipartUpload
+		// falha antes de ler o restante) — sem isso, a goroutine produtora trava para
+		// sempre em pw.Write() esperando um leitor que nunca mais aparece.
+		pr.CloseWithError(uploadErr)
+	}
 
 	zipErr := <-zipErrCh
 

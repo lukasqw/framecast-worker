@@ -72,6 +72,7 @@ func newTestProcessor(t *testing.T) (*Processor, *processorTestDeps) {
 		queueURL:             "queue-url",
 		workerID:             "worker-1",
 		ffmpegTimeoutMinutes: 30,
+		ffmpegFPS:            1,
 		notifier:             notif,
 	}
 	return p, &processorTestDeps{mock: mock, s3: s3Fake, up: up, sqs: sqsFake, notif: notif}
