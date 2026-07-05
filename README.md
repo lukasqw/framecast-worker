@@ -76,14 +76,14 @@ framecast-worker/
 |---------|-----------|------|
 | JSON inválido | Não | DeleteMessage + skip |
 | Lease em uso (worker vivo) | Sim (SQS reentrega) | Return error; sem DeleteMessage |
-| Download S3 falha | **Não** | `markError` + `SendFailure` + `DeleteMessage` |
+| Download S3 falha | **Sim** | `return err`; sem `DeleteMessage` — reentrega até `maxReceiveCount` (3×) → DLQ |
 | FFmpeg erro/timeout | **Não** | `markError` + `SendFailure` + `DeleteMessage` |
-| ZIP/upload S3 falha | **Não** | `markError` + `SendFailure` + `DeleteMessage` |
+| ZIP/upload S3 falha | **Sim** | `return err`; sem `DeleteMessage` — reentrega até `maxReceiveCount` (3×) → DLQ |
 | Worker crasha mid-flight | Sim | Heartbeat para → lease expira (3min) → SQS reentrega |
 | 3 falhas consecutivas | Sim (DLQ) | SQS move para DLQ → `DLQHandler` marca ERROR + notifica |
 | SES/SMTP falha | — | Best-effort: log apenas, não bloqueia ACK |
 
-> **Atenção:** download, FFmpeg e ZIP são todos não-retentáveis via reentrega SQS. Retentabilidade acontece somente via crash do worker (heartbeat pára → lease expira).
+> **Atenção:** só o FFmpeg tem tratamento não-retentável direto (`markError` + e-mail + `DeleteMessage` na hora). Download S3 e ZIP/upload S3 apenas retornam erro sem ACK — reentregam via SQS igual a um crash do worker, até esgotar `maxReceiveCount` e cair na DLQ.
 
 ---
 

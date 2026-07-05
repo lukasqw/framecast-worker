@@ -34,10 +34,10 @@ Consumer.Run → semáforo → goroutine → processor.Process:
 
 `SELECT ... FOR UPDATE` na tabela `videos`. Lease via `worker_id` (UUID, não hostname) + `last_heartbeat_at`. Lease TTL = 3min = 3× heartbeatInterval (1min). Worker morto → heartbeat para → outro pod reassume após 3min.
 
-## Erros — TODOS são não-retentáveis exceto crash
+## Erros — só FFmpeg é não-retentável direto; download e ZIP/upload reentregam via SQS
 
-Download S3, FFmpeg, ZIP → `markError + SendFailure + DeleteMessage` (sem reentrada SQS).  
-Crash do worker → SQS reentrega após visibility expirar → até 3× → DLQ.  
+FFmpeg (codec/corrompido/timeout) → `markError + SendFailure + DeleteMessage` imediato (sem reentrega).  
+Download S3 e ZIP/upload S3 → apenas `return err` (sem `DeleteMessage`) — reentregam via SQS igual a um crash do worker, até esgotar `maxReceiveCount` (3×) e cair na DLQ.  
 DLQ consumer (ativado por `SQS_DLQ_URL`) → `markError + notifica + DeleteMessage`.
 
 ## Notificação de e-mail
