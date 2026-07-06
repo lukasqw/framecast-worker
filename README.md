@@ -76,14 +76,14 @@ framecast-worker/
 |---------|-----------|------|
 | JSON inválido | Não | DeleteMessage + skip |
 | Lease em uso (worker vivo) | Sim (SQS reentrega) | Return error; sem DeleteMessage |
-| Download S3 falha | **Não** | `markError` + `SendFailure` + `DeleteMessage` |
+| Download S3 falha | **Sim** | `return err`; sem `DeleteMessage` — reentrega até `maxReceiveCount` (3×) → DLQ |
 | FFmpeg erro/timeout | **Não** | `markError` + `SendFailure` + `DeleteMessage` |
-| ZIP/upload S3 falha | **Não** | `markError` + `SendFailure` + `DeleteMessage` |
+| ZIP/upload S3 falha | **Sim** | `return err`; sem `DeleteMessage` — reentrega até `maxReceiveCount` (3×) → DLQ |
 | Worker crasha mid-flight | Sim | Heartbeat para → lease expira (3min) → SQS reentrega |
 | 3 falhas consecutivas | Sim (DLQ) | SQS move para DLQ → `DLQHandler` marca ERROR + notifica |
 | SES/SMTP falha | — | Best-effort: log apenas, não bloqueia ACK |
 
-> **Atenção:** download, FFmpeg e ZIP são todos não-retentáveis via reentrega SQS. Retentabilidade acontece somente via crash do worker (heartbeat pára → lease expira).
+> **Atenção:** só o FFmpeg tem tratamento não-retentável direto (`markError` + e-mail + `DeleteMessage` na hora). Download S3 e ZIP/upload S3 apenas retornam erro sem ACK — reentregam via SQS igual a um crash do worker, até esgotar `maxReceiveCount` e cair na DLQ.
 
 ---
 
@@ -97,6 +97,7 @@ framecast-worker/
 | `SQS_QUEUE_URL` | ✅ | — | URL da fila principal de processamento |
 | `SES_FROM_EMAIL` | ✅ | — | Remetente SES (identidade verificada) |
 | `SQS_DLQ_URL` | — | `""` | URL da DLQ — habilita DLQHandler se preenchido |
+| `EMAIL_NOTIFICATIONS_ENABLED` | — | `true` | `false` desliga o envio de e-mail (usa `NoOpNotifier`) sem mudar o backend configurado |
 | `NOTIFIER_BACKEND` | — | `smtp` | `smtp` ou `ses` |
 | `SMTP_HOST` | — | — | Servidor SMTP (ex: `sandbox.smtp.mailtrap.io`) |
 | `SMTP_PORT` | — | — | Porta SMTP (ex: `2525`) |
@@ -193,6 +194,12 @@ Com `SES_RECIPIENT_OVERRIDE` configurado, todos os e-mails chegam no mesmo ender
 | FFmpeg conclui com sucesso | "Seu vídeo está pronto para download" |
 | FFmpeg falha (codec/timeout) | "Falha no processamento do seu vídeo" |
 | Mensagem vai para DLQ (3× tentativas) | "Falha no processamento do seu vídeo" |
+
+Layout HTML moderno (card escuro, com fallback texto-plano para clientes sem suporte a
+HTML) — templates em `internal/infra/email/template.go`. O e-mail de sucesso inclui um
+botão com a URL de download direto do ZIP (S3 presigned, TTL 7 dias, best-effort: se a
+geração da URL falhar, o e-mail sai sem o botão em vez de bloquear a notificação).
+`EMAIL_NOTIFICATIONS_ENABLED=false` desliga o envio inteiro (`NoOpNotifier`).
 
 ---
 
